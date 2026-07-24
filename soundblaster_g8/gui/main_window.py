@@ -18,8 +18,8 @@ class MainWindow(tk.Tk):
         super().__init__()
 
         self.title("Sound Blaster G8 - Control")
-        self.geometry("500x400")
-        self.resizable(False, False)
+        self.geometry("600x450")
+        self.resizable(True, True)
 
         # Controller singleton
         self._controller: Optional[SoundBlasterController] = None
@@ -45,77 +45,83 @@ class MainWindow(tk.Tk):
         )
         title_label.pack()
 
-        # Cadre des contrôles principaux
+         # Cadre des contrôles principaux
         controls_frame = ttk.Frame(self, padding=20)
         controls_frame.pack(expand=True, fill=tk.BOTH)
 
-        # Direct Mode
+         # Direct Mode - Cadre personnalisé pour le bouton avec texte sur deux lignes
         direct_frame = ttk.LabelFrame(controls_frame, text="Direct Mode", padding=10)
         direct_frame.pack(fill=tk.X, pady=(0, 10))
 
-        direct_label = ttk.Label(
-            direct_frame,
-            text="Mode direct: sans traitement du signal"
-        )
-        direct_label.pack(pady=(0, 5))
+        self._direct_toggle_frame = tk.Frame(direct_frame)
+        self._direct_toggle_frame.pack(expand=True, fill=tk.X, padx=10, pady=5)
 
-        self._direct_toggle = ttk.Checkbutton(
-            direct_frame,
+        self._direct_toggle_label = ttk.Label(
+            self._direct_toggle_frame,
+            text="Direct Mode\nSans traitement du signal",
+            justify=tk.RIGHT
+          )
+        self._direct_toggle_label.pack(side=tk.LEFT, expand=True, fill=tk.X)
+
+        self._direct_toggle_switch = tk.Checkbutton(
+            self._direct_toggle_frame,
             variable=self._direct_mode_var,
             command=self._on_direct_mode_change
-        )
-        self._direct_toggle.pack()
+          )
+        self._direct_toggle_switch.pack(side=tk.RIGHT)
 
-        # Scout Mode
+        # Scout Mode - Cadre personnalisé pour le bouton avec texte sur deux lignes
         scout_frame = ttk.LabelFrame(controls_frame, text="Scout Mode", padding=10)
         scout_frame.pack(fill=tk.X, pady=(0, 10))
 
-        scout_label = ttk.Label(
-            scout_frame,
-            text="Mode Scout: détecte les sons dans le jeu"
-        )
-        scout_label.pack(pady=(0, 5))
+        self._scout_toggle_frame = tk.Frame(scout_frame)
+        self._scout_toggle_frame.pack(expand=True, fill=tk.X, padx=10, pady=5)
 
-        self._scout_toggle = ttk.Checkbutton(
-            scout_frame,
+        self._scout_toggle_label = ttk.Label(
+            self._scout_toggle_frame,
+            text="Scout Mode\nDétection des sons dans le jeu",
+            justify=tk.RIGHT
+          )
+        self._scout_toggle_label.pack(side=tk.LEFT, expand=True, fill=tk.X)
+
+        self._scout_toggle_switch = tk.Checkbutton(
+            self._scout_toggle_frame,
             variable=self._scout_mode_var,
             command=self._on_scout_mode_change
-        )
-        self._scout_toggle.pack()
+          )
+        self._scout_toggle_switch.pack(side=tk.RIGHT)
 
-        # CrystalVoice
+        # CrystalVoice - Cadre personnalisé pour le bouton avec texte sur deux lignes
         crystalvoice_frame = ttk.LabelFrame(controls_frame, text="CrystalVoice", padding=10)
         crystalvoice_frame.pack(fill=tk.X, pady=(0, 10))
 
-        crystalvoice_label = ttk.Label(
-            crystalvoice_frame,
-            text="CrystalVoice: optimisation de la voix en jeu"
-        )
-        crystalvoice_label.pack(pady=(0, 5))
+        self._crystalvoice_toggle_frame = tk.Frame(crystalvoice_frame)
+        self._crystalvoice_toggle_frame.pack(expand=True, fill=tk.X, padx=10, pady=5)
 
-        self._crystalvoice_toggle = ttk.Checkbutton(
-            crystalvoice_frame,
+        self._crystalvoice_toggle_label = ttk.Label(
+            self._crystalvoice_toggle_frame,
+            text="CrystalVoice\nOptimisation de la voix en jeu",
+            justify=tk.RIGHT
+          )
+        self._crystalvoice_toggle_label.pack(side=tk.LEFT, expand=True, fill=tk.X)
+
+        self._crystalvoice_toggle_switch = tk.Checkbutton(
+            self._crystalvoice_toggle_frame,
             variable=self._crystalvoice_var,
             command=self._on_crystalvoice_change
-        )
-        self._crystalvoice_toggle.pack()
+          )
+        self._crystalvoice_toggle_switch.pack(side=tk.RIGHT)
 
         # Section EQ
         eq_frame = ttk.LabelFrame(controls_frame, text="Égaliseur", padding=10)
         eq_frame.pack(fill=tk.X, pady=(0, 10))
 
-        eq_info = ttk.Label(
-            eq_frame,
-            text="Cliquez sur 'Configurer' pour accéder à l'égaliseur 10 bandes"
-        )
-        eq_info.pack(pady=(0, 5))
-
         self._eq_button = ttk.Button(
             eq_frame,
-            text="Configurer",
+            text="Configurer\nAccès à l'égaliseur 10 bandes",
             command=self._open_eq_panel
-        )
-        self._eq_button.pack()
+         )
+        self._eq_button.pack(side=tk.LEFT, expand=True, fill=tk.X)
 
         # Status bar
         status_bar = tk.Frame(self, relief=tk.SUNKEN, bd=1)
