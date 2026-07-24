@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "soundblaster-g8"
+version = "0.1.0"
+description = "Application de contrôle pour Creative Sound Blaster G8"
+requires-python = ">=3.12"
+authors = [{name = "OpenCreativeApp"}]
+
+[project.scripts]
+soundblaster-g8 = "main:main"
+
+[tool.setuptools.packages.find]
+include = ["soundblaster_g8*"]

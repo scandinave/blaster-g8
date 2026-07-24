@@ -1,0 +1,6 @@
+Metadata-Version: 2.4
+Name: soundblaster-g8
+Version: 0.1.0
+Summary: Application de contrôle pour Creative Sound Blaster G8
+Author: OpenCreativeApp
+Requires-Python: >=3.12
