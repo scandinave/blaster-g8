@@ -49,8 +49,8 @@ class MainWindow(tk.Tk):
         controls_frame = ttk.Frame(self, padding=20)
         controls_frame.pack(expand=True, fill=tk.BOTH)
 
-         # Direct Mode - Cadre personnalisé pour le bouton avec texte sur deux lignes
-        direct_frame = ttk.LabelFrame(controls_frame, text="Direct Mode", padding=10)
+          # Direct Mode - Cadre personnalisé pour le bouton avec texte sur deux lignes
+        direct_frame = ttk.Frame(controls_frame, padding=10)
         direct_frame.pack(fill=tk.X, pady=(0, 10))
 
         self._direct_toggle_frame = tk.Frame(direct_frame)
@@ -59,19 +59,19 @@ class MainWindow(tk.Tk):
         self._direct_toggle_label = ttk.Label(
             self._direct_toggle_frame,
             text="Direct Mode\nSans traitement du signal",
-            justify=tk.RIGHT
-          )
+            justify=tk.LEFT
+           )
         self._direct_toggle_label.pack(side=tk.LEFT, expand=True, fill=tk.X)
 
         self._direct_toggle_switch = tk.Checkbutton(
             self._direct_toggle_frame,
             variable=self._direct_mode_var,
             command=self._on_direct_mode_change
-          )
+           )
         self._direct_toggle_switch.pack(side=tk.RIGHT)
 
-        # Scout Mode - Cadre personnalisé pour le bouton avec texte sur deux lignes
-        scout_frame = ttk.LabelFrame(controls_frame, text="Scout Mode", padding=10)
+          # Scout Mode - Cadre personnalisé pour le bouton avec texte sur deux lignes
+        scout_frame = ttk.Frame(controls_frame, padding=10)
         scout_frame.pack(fill=tk.X, pady=(0, 10))
 
         self._scout_toggle_frame = tk.Frame(scout_frame)
@@ -80,19 +80,19 @@ class MainWindow(tk.Tk):
         self._scout_toggle_label = ttk.Label(
             self._scout_toggle_frame,
             text="Scout Mode\nDétection des sons dans le jeu",
-            justify=tk.RIGHT
-          )
+            justify=tk.LEFT
+           )
         self._scout_toggle_label.pack(side=tk.LEFT, expand=True, fill=tk.X)
 
         self._scout_toggle_switch = tk.Checkbutton(
             self._scout_toggle_frame,
             variable=self._scout_mode_var,
             command=self._on_scout_mode_change
-          )
+           )
         self._scout_toggle_switch.pack(side=tk.RIGHT)
 
-        # CrystalVoice - Cadre personnalisé pour le bouton avec texte sur deux lignes
-        crystalvoice_frame = ttk.LabelFrame(controls_frame, text="CrystalVoice", padding=10)
+          # CrystalVoice - Cadre personnalisé pour le bouton avec texte sur deux lignes
+        crystalvoice_frame = ttk.Frame(controls_frame, padding=10)
         crystalvoice_frame.pack(fill=tk.X, pady=(0, 10))
 
         self._crystalvoice_toggle_frame = tk.Frame(crystalvoice_frame)
@@ -101,15 +101,15 @@ class MainWindow(tk.Tk):
         self._crystalvoice_toggle_label = ttk.Label(
             self._crystalvoice_toggle_frame,
             text="CrystalVoice\nOptimisation de la voix en jeu",
-            justify=tk.RIGHT
-          )
+            justify=tk.LEFT
+           )
         self._crystalvoice_toggle_label.pack(side=tk.LEFT, expand=True, fill=tk.X)
 
         self._crystalvoice_toggle_switch = tk.Checkbutton(
             self._crystalvoice_toggle_frame,
             variable=self._crystalvoice_var,
             command=self._on_crystalvoice_change
-          )
+           )
         self._crystalvoice_toggle_switch.pack(side=tk.RIGHT)
 
         # Section EQ
