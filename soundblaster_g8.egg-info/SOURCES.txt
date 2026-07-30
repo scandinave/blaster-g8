@@ -3,10 +3,12 @@ pyproject.toml
 soundblaster_g8/__init__.py
 soundblaster_g8/controller.py
 soundblaster_g8/driver.py
+soundblaster_g8/protocol.py
 soundblaster_g8.egg-info/PKG-INFO
 soundblaster_g8.egg-info/SOURCES.txt
 soundblaster_g8.egg-info/dependency_links.txt
 soundblaster_g8.egg-info/entry_points.txt
+soundblaster_g8.egg-info/requires.txt
 soundblaster_g8.egg-info/top_level.txt
 soundblaster_g8/gui/__init__.py
 soundblaster_g8/gui/eq_panel.py

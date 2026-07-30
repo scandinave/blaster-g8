@@ -4,3 +4,6 @@ Version: 0.1.0
 Summary: Application de contrôle pour Creative Sound Blaster G8
 Author: OpenCreativeApp
 Requires-Python: >=3.12
+Requires-Dist: hidapi>=0.10.0
+Provides-Extra: hid
+Requires-Dist: hidapi>=0.10.0; extra == "hid"

@@ -8,6 +8,10 @@ version = "0.1.0"
 description = "Application de contrôle pour Creative Sound Blaster G8"
 requires-python = ">=3.12"
 authors = [{name = "OpenCreativeApp"}]
+dependencies = ["hidapi>=0.10.0"]
+
+[project.optional-dependencies]
+hid = ["hidapi>=0.10.0"]
 
 [project.scripts]
 soundblaster-g8 = "main:main"

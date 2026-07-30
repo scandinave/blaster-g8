@@ -142,10 +142,35 @@ class MainWindow(tk.Tk):
         from ..controller import get_controller
         self._controller = get_controller()
         if self._controller.connect():
-            self._status_label.config(text="Connecté à Sound Blaster G8")
+            info = self._controller.get_debug_info()
+            self._status_label.config(
+                text=f"Connecté à Sound Blaster G8 (interface {info.get('interface_number')})"
+            )
             self._load_current_state()
         else:
-            self._status_label.config(text="Mode simulation (pas de matériel détecté)")
+            self._status_label.config(
+                text="Aucun matériel détecté - les commandes n'auront aucun effet"
+            )
+
+        self._apply_feature_availability()
+
+    def _apply_feature_availability(self):
+        """Grise les contrôles dont la trame USB n'a pas encore été reversée."""
+        if not self._controller:
+            return
+
+        for feature, switch, label in (
+            ("direct_mode", self._direct_toggle_switch, self._direct_toggle_label),
+            ("scout_mode", self._scout_toggle_switch, self._scout_toggle_label),
+            ("crystalvoice", self._crystalvoice_toggle_switch,
+             self._crystalvoice_toggle_label),
+        ):
+            if not self._controller.is_feature_supported(feature):
+                switch.config(state=tk.DISABLED)
+                label.config(text=f"{label.cget('text')}\n(non implémenté)")
+
+        if not self._controller.is_feature_supported("eq"):
+            self._eq_button.config(state=tk.DISABLED)
 
     def _load_current_state(self):
         """Charge l'état actuel depuis le contrôleur."""
@@ -157,26 +182,43 @@ class MainWindow(tk.Tk):
         self._scout_mode_var.set(self._controller.get_scout_mode())
         self._crystalvoice_var.set(self._controller.get_crystalvoice())
 
+    def _handle_toggle(self, name: str, label: str, var: tk.BooleanVar, setter):
+        """Applique un toggle et annule l'affichage si la carte refuse."""
+        if not self._controller:
+            return
+
+        requested = var.get()
+        if setter(requested):
+            state = "activé" if requested else "désactivé"
+            self._status_label.config(text=f"{label} {state}")
+        else:
+            # La carte n'a pas confirmé : on remet l'interrupteur dans son
+            # état précédent pour ne pas afficher un état mensonger.
+            var.set(not requested)
+            self._status_label.config(
+                text=f"{label} : échec de la commande (voir la console)"
+            )
+
     def _on_direct_mode_change(self):
         """Gère le changement du Direct Mode."""
-        if self._controller:
-            self._controller.set_direct_mode(self._direct_mode_var.get())
-            state = "activé" if self._direct_mode_var.get() else "désactivé"
-            self._status_label.config(text=f"Direct Mode {state}")
+        self._handle_toggle(
+            "direct_mode", "Direct Mode", self._direct_mode_var,
+            lambda v: self._controller.set_direct_mode(v),
+        )
 
     def _on_scout_mode_change(self):
         """Gère le changement du Scout Mode."""
-        if self._controller:
-            self._controller.set_scout_mode(self._scout_mode_var.get())
-            state = "activé" if self._scout_mode_var.get() else "désactivé"
-            self._status_label.config(text=f"Scout Mode {state}")
+        self._handle_toggle(
+            "scout_mode", "Scout Mode", self._scout_mode_var,
+            lambda v: self._controller.set_scout_mode(v),
+        )
 
     def _on_crystalvoice_change(self):
         """Gère le changement du CrystalVoice."""
-        if self._controller:
-            self._controller.set_crystalvoice(self._crystalvoice_var.get())
-            state = "activé" if self._crystalvoice_var.get() else "désactivé"
-            self._status_label.config(text=f"CrystalVoice {state}")
+        self._handle_toggle(
+            "crystalvoice", "CrystalVoice", self._crystalvoice_var,
+            lambda v: self._controller.set_crystalvoice(v),
+        )
 
     def _open_eq_panel(self):
         """Ouvre le panneau d'égaliseur."""
