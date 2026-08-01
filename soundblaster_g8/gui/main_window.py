@@ -1,6 +1,8 @@
 """
 MainWindow pour l'application de contrôle Sound Blaster G8.
-Interface Tkinter avec les contrôles principaux.
+Interface Tkinter thème sombre (voir ``theme.py``/``widgets.py``), conforme
+au mockup de design « Sound Blaster G8.dc.html » (photo produit, badges
+d'icônes, sélecteur de mode sonore façon « split button »).
 
 Les commandes matérielles sont exécutées dans un thread de travail : une
 bascule du Direct Mode provoque un reset USB de la carte et prend 2 à 4
@@ -14,13 +16,15 @@ même conteneur, une seule visible à la fois (pas de fenêtre flottante) : voir
 
 import threading
 import tkinter as tk
-from tkinter import ttk
+from pathlib import Path
 from typing import Callable, Optional
 
 from ..controller import SoundBlasterController
+from . import theme, widgets
 from .eq_panel import EQPanel
 
-MIN_WINDOW_WIDTH = 600
+MIN_WINDOW_WIDTH = 640
+ASSETS_DIR = Path(__file__).parent / "assets"
 
 
 class MainWindow(tk.Tk):
@@ -41,44 +45,56 @@ class MainWindow(tk.Tk):
         self._scout_mode_var = tk.BooleanVar(value=False)
         self._crystalvoice_var = tk.BooleanVar(value=False)
 
-        # Mode sonore : liste (slug, label) et variable liée au Combobox.
+        # Mode sonore : listes parallèles (slugs/labels) pilotant le SplitSelect.
         self._sound_mode_slugs: list[str] = []
-        self._sound_mode_var = tk.StringVar(value="")
+        self._sound_mode_labels: list[str] = []
 
         # Interrupteurs indisponibles (fonction non reversée) : ils ne doivent
         # pas être réactivés à la fin d'une commande.
         self._unavailable: set[str] = set()
-        self._switches: dict[str, tk.Checkbutton] = {}
+        self._switches: dict[str, widgets.ToggleSwitch] = {}
+        self._toggle_rows: dict[str, dict] = {}
+        self._eq_enabled = True
 
         # Configuration de la fenêtre
         self._setup_ui()
 
     def _setup_ui(self):
         """Configure l'interface utilisateur : en-tête, pages, barre de statut."""
+        theme.apply_theme(self)
+
         self._setup_header()
 
         # Conteneur des pages : main_page et eq_page sont frères, une seule
         # est empaquetée à la fois (voir _show_main_page/_show_eq_page).
-        self._pages_container = ttk.Frame(self)
+        self._pages_container = tk.Frame(self, bg=theme.BG_WINDOW)
         self._pages_container.pack(expand=True, fill=tk.BOTH)
 
-        self._main_page = ttk.Frame(self._pages_container)
-        self._eq_page = ttk.Frame(self._pages_container)
+        self._main_page = tk.Frame(self._pages_container, bg=theme.BG_WINDOW)
+        self._eq_page = tk.Frame(self._pages_container, bg=theme.BG_WINDOW)
 
         self._setup_main_page(self._main_page)
         # L'EQPanel a besoin du contrôleur : construit dans _init_controller.
         self._eq_panel: Optional[EQPanel] = None
 
         # Status bar (partagée entre les deux pages)
-        status_bar = tk.Frame(self, relief=tk.SUNKEN, bd=1)
+        status_bar = tk.Frame(self, bg=theme.BG_WINDOW)
         status_bar.pack(fill=tk.X, side=tk.BOTTOM)
 
         self._status_label = tk.Label(
             status_bar,
             text="Prêt",
-            anchor=tk.W
+            anchor=tk.W,
+            bg=theme.BG_WINDOW,
+            fg=theme.FG_STATUSBAR,
+            font=theme.FONT_SMALL,
+            padx=24,
+            pady=10,
         )
-        self._status_label.pack(expand=True, fill=tk.X, padx=5, pady=2)
+        self._status_label.pack(expand=True, fill=tk.X)
+
+        divider = tk.Frame(self, bg=theme.BORDER_CARD, height=1)
+        divider.pack(fill=tk.X, side=tk.BOTTOM)
 
         self._show_main_page()
 
@@ -89,127 +105,170 @@ class MainWindow(tk.Tk):
 
     def _setup_header(self):
         """En-tête commun : bouton retour (masqué sur la page principale) + titre."""
-        header_frame = tk.Frame(self, pady=10)
-        header_frame.pack(fill=tk.X)
+        header = tk.Frame(self, bg=theme.BG_WINDOW, height=64)
+        header.pack(fill=tk.X)
+        header.pack_propagate(False)
 
-        self._back_button = ttk.Button(
-            header_frame, text="← Retour", command=self._show_main_page,
+        self._back_button = widgets.RoundedButton(
+            header,
+            text="←  Retour",
+            command=self._show_main_page,
+            bg=theme.BG_WINDOW,
+            fill=theme.BG_CONTROL,
+            fg=theme.FG_PRIMARY,
+            font=theme.FONT_BUTTON,
+            padx=16,
+            pady=8,
         )
-        # Empaqueté/masqué dynamiquement par _show_main_page/_show_eq_page.
+        # Placé/masqué dynamiquement par _show_main_page/_show_eq_page.
 
         self._title_label = tk.Label(
-            header_frame,
+            header,
             text="Sound Blaster G8",
-            font=("Helvetica", 16, "bold")
+            bg=theme.BG_WINDOW,
+            fg=theme.FG_PRIMARY,
+            font=theme.FONT_TITLE,
         )
-        self._title_label.pack()
-        self._header_frame = header_frame
+        self._title_label.place(relx=0.5, rely=0.5, anchor="center")
+        self._header_frame = header
 
     def _setup_main_page(self, controls_frame_parent):
-        """Construit le contenu de la page principale."""
-        controls_frame = ttk.Frame(controls_frame_parent, padding=20)
-        controls_frame.pack(expand=True, fill=tk.BOTH)
+        """Construit le contenu de la page principale : photo produit + grille 2 colonnes."""
+        outer = tk.Frame(controls_frame_parent, bg=theme.BG_WINDOW)
+        outer.pack(expand=True, fill=tk.BOTH, padx=32, pady=(20, 24))
 
-          # Direct Mode - Cadre personnalisé pour le bouton avec texte sur deux lignes
-        direct_frame = ttk.Frame(controls_frame, padding=10)
-        direct_frame.pack(fill=tk.X, pady=(0, 10))
+        self._build_photo_header(outer)
 
-        self._direct_toggle_frame = tk.Frame(direct_frame)
-        self._direct_toggle_frame.pack(expand=True, fill=tk.X, padx=10, pady=5)
+        grid = tk.Frame(outer, bg=theme.BG_WINDOW)
+        grid.pack(fill=tk.BOTH, expand=True)
+        grid.columnconfigure(0, weight=1, uniform="col")
+        grid.columnconfigure(1, weight=1, uniform="col")
 
-        self._direct_toggle_label = ttk.Label(
-            self._direct_toggle_frame,
-            text="Direct Mode\nSans traitement du signal",
-            justify=tk.LEFT
-           )
-        self._direct_toggle_label.pack(side=tk.LEFT, expand=True, fill=tk.X)
+        left = tk.Frame(grid, bg=theme.BG_WINDOW)
+        right = tk.Frame(grid, bg=theme.BG_WINDOW)
+        left.grid(row=0, column=0, sticky="new", padx=(0, 12))
+        right.grid(row=0, column=1, sticky="new", padx=(12, 0))
 
-        self._direct_toggle_switch = tk.Checkbutton(
-            self._direct_toggle_frame,
-            variable=self._direct_mode_var,
-            command=self._on_direct_mode_change
-           )
-        self._direct_toggle_switch.pack(side=tk.RIGHT)
+        self._toggle_rows["direct_mode"] = self._build_toggle_row(
+            left, "direct", "Direct Mode", "Sans traitement du signal",
+            self._direct_mode_var, self._on_direct_mode_change,
+        )
+        self._toggle_rows["scout_mode"] = self._build_toggle_row(
+            left, "scout", "Scout Mode", "Détection des sons dans le jeu",
+            self._scout_mode_var, self._on_scout_mode_change,
+        )
+        self._toggle_rows["crystalvoice"] = self._build_toggle_row(
+            left, "voice", "CrystalVoice", "Optimisation de la voix en jeu",
+            self._crystalvoice_var, self._on_crystalvoice_change,
+        )
 
-          # Scout Mode - Cadre personnalisé pour le bouton avec texte sur deux lignes
-        scout_frame = ttk.Frame(controls_frame, padding=10)
-        scout_frame.pack(fill=tk.X, pady=(0, 10))
+        self._direct_toggle_switch = self._toggle_rows["direct_mode"]["switch"]
+        self._scout_toggle_switch = self._toggle_rows["scout_mode"]["switch"]
+        self._crystalvoice_toggle_switch = self._toggle_rows["crystalvoice"]["switch"]
 
-        self._scout_toggle_frame = tk.Frame(scout_frame)
-        self._scout_toggle_frame.pack(expand=True, fill=tk.X, padx=10, pady=5)
+        self._build_sound_mode_row(right)
+        self._build_equalizer_row(right)
 
-        self._scout_toggle_label = ttk.Label(
-            self._scout_toggle_frame,
-            text="Scout Mode\nDétection des sons dans le jeu",
-            justify=tk.LEFT
-           )
-        self._scout_toggle_label.pack(side=tk.LEFT, expand=True, fill=tk.X)
+    def _build_photo_header(self, parent):
+        """Affiche la photo produit (coins arrondis) en tête de la page principale."""
+        photo_path = ASSETS_DIR / "g8_photo.png"
+        if not photo_path.exists():
+            return
+        # Référence conservée sur self : sinon le PhotoImage est ramassé par le GC.
+        self._g8_photo_image = tk.PhotoImage(file=str(photo_path))
+        tk.Label(
+            parent, image=self._g8_photo_image, bg=theme.BG_WINDOW, bd=0, highlightthickness=0,
+        ).pack(pady=(0, 24))
 
-        self._scout_toggle_switch = tk.Checkbutton(
-            self._scout_toggle_frame,
-            variable=self._scout_mode_var,
-            command=self._on_scout_mode_change
-           )
-        self._scout_toggle_switch.pack(side=tk.RIGHT)
+    def _build_row_icon_text(self, parent, icon: str, title: str, subtitle: str, subtitle_wrap: int = 280):
+        """Construit une ligne badge d'icône + titre/sous-titre. Retourne (row, badge, title, subtitle)."""
+        row = tk.Frame(parent, bg=theme.BG_WINDOW)
+        row.pack(fill=tk.X, pady=(0, 36))
 
-          # CrystalVoice - Cadre personnalisé pour le bouton avec texte sur deux lignes
-        crystalvoice_frame = ttk.Frame(controls_frame, padding=10)
-        crystalvoice_frame.pack(fill=tk.X, pady=(0, 10))
+        left = tk.Frame(row, bg=theme.BG_WINDOW)
+        left.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        self._crystalvoice_toggle_frame = tk.Frame(crystalvoice_frame)
-        self._crystalvoice_toggle_frame.pack(expand=True, fill=tk.X, padx=10, pady=5)
+        badge = widgets.IconBadge(left, icon, bg=theme.BG_WINDOW)
+        badge.pack(side=tk.LEFT, anchor="n", padx=(0, 14))
 
-        self._crystalvoice_toggle_label = ttk.Label(
-            self._crystalvoice_toggle_frame,
-            text="CrystalVoice\nOptimisation de la voix en jeu",
-            justify=tk.LEFT
-           )
-        self._crystalvoice_toggle_label.pack(side=tk.LEFT, expand=True, fill=tk.X)
+        text_frame = tk.Frame(left, bg=theme.BG_WINDOW)
+        text_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        self._crystalvoice_toggle_switch = tk.Checkbutton(
-            self._crystalvoice_toggle_frame,
-            variable=self._crystalvoice_var,
-            command=self._on_crystalvoice_change
-           )
-        self._crystalvoice_toggle_switch.pack(side=tk.RIGHT)
+        title_label = tk.Label(
+            text_frame, text=title, bg=theme.BG_WINDOW, fg=theme.FG_PRIMARY,
+            font=theme.FONT_SECTION, anchor="w", justify=tk.LEFT,
+        )
+        title_label.pack(anchor="w")
 
-          # Mode Sonore - sélection parmi les modes reversés depuis les captures
-        sound_mode_frame = ttk.Frame(controls_frame, padding=10)
-        sound_mode_frame.pack(fill=tk.X, pady=(0, 10))
+        subtitle_label = tk.Label(
+            text_frame, text=subtitle, bg=theme.BG_WINDOW, fg=theme.FG_SECONDARY,
+            font=theme.FONT_SUBTITLE, anchor="w", justify=tk.LEFT, wraplength=subtitle_wrap,
+        )
+        subtitle_label.pack(anchor="w", pady=(4, 0))
 
-        self._sound_mode_inner_frame = tk.Frame(sound_mode_frame)
-        self._sound_mode_inner_frame.pack(expand=True, fill=tk.X, padx=10, pady=5)
+        return row, badge, title_label, subtitle_label
 
-        self._sound_mode_label = ttk.Label(
-            self._sound_mode_inner_frame,
-            text="Mode Sonore\nÉgaliseur et acoustic engine",
-            justify=tk.LEFT
-           )
-        self._sound_mode_label.pack(side=tk.LEFT, expand=True, fill=tk.X)
+    def _build_toggle_row(
+        self,
+        parent,
+        icon: str,
+        title: str,
+        subtitle: str,
+        variable: tk.BooleanVar,
+        on_change: Callable[[], None],
+    ) -> dict:
+        """Construit une ligne badge + label/sous-titre + interrupteur à bascule."""
+        row, badge, title_label, subtitle_label = self._build_row_icon_text(parent, icon, title, subtitle)
+        switch = widgets.ToggleSwitch(row, variable=variable, command=on_change, bg=theme.BG_WINDOW)
+        switch.pack(side=tk.RIGHT, anchor="n", padx=(16, 0))
+        return {"badge": badge, "title": title_label, "subtitle": subtitle_label, "switch": switch}
 
-        self._sound_mode_combo = ttk.Combobox(
-            self._sound_mode_inner_frame,
-            textvariable=self._sound_mode_var,
-            state="readonly",
-            width=28,
-           )
-        self._sound_mode_combo.pack(side=tk.RIGHT)
-        self._sound_mode_combo.bind("<<ComboboxSelected>>", self._on_sound_mode_change)
+    def _build_sound_mode_row(self, parent):
+        """Bloc « Mode Sonore » : badge + label, sélecteur « split button » à droite."""
+        row, _badge, _title, subtitle_label = self._build_row_icon_text(
+            parent, "equalizer", "Mode Sonore", "Égaliseur et acoustic engine", subtitle_wrap=200,
+        )
+        self._sound_mode_label = subtitle_label
+        self._sound_mode_select = widgets.SplitSelect(
+            row, values=[], command=self._on_sound_mode_change, bg=theme.BG_WINDOW, width=230,
+        )
+        self._sound_mode_select.pack(side=tk.RIGHT, anchor="n", padx=(16, 0))
 
-          # Équaliseur - même gabarit que les autres lignes, mais un seul
-          # bouton pleine largeur (pas de label séparé) : titre + mode actif.
-        eq_frame = ttk.Frame(controls_frame, padding=10)
-        eq_frame.pack(fill=tk.X, pady=(0, 10))
+    def _build_equalizer_row(self, parent):
+        """Ligne cliquable « Équaliseur » (badge + titre + mode actif), sans fond de carte."""
+        row, badge, title_label, subtitle_label = self._build_row_icon_text(
+            parent, "equalizer", "Équaliseur", "", subtitle_wrap=280,
+        )
+        self._eq_row = row
+        self._eq_nav_badge = badge
+        self._eq_nav_title = title_label
+        self._eq_nav_subtitle = subtitle_label
+        self._bind_click_recursive(row, self._on_eq_row_click)
+        self._set_row_cursor(row, "hand2")
 
-        eq_inner_frame = tk.Frame(eq_frame)
-        eq_inner_frame.pack(expand=True, fill=tk.X, padx=10, pady=5)
+    def _bind_click_recursive(self, widget, handler) -> None:
+        widget.bind("<Button-1>", handler)
+        for child in widget.winfo_children():
+            self._bind_click_recursive(child, handler)
 
-        self._eq_nav_button = ttk.Button(
-            eq_inner_frame,
-            text="Équaliseur",
-            command=self._show_eq_page,
-         )
-        self._eq_nav_button.pack(expand=True, fill=tk.X)
+    def _set_row_cursor(self, widget, cursor: str) -> None:
+        try:
+            widget.config(cursor=cursor)
+        except tk.TclError:
+            pass
+        for child in widget.winfo_children():
+            self._set_row_cursor(child, cursor)
+
+    def _on_eq_row_click(self, _event=None):
+        if self._eq_enabled:
+            self._show_eq_page()
+
+    def _set_eq_nav_enabled(self, enabled: bool) -> None:
+        self._eq_enabled = enabled
+        self._eq_nav_badge.set_enabled(enabled)
+        self._eq_nav_title.config(fg=theme.FG_PRIMARY if enabled else theme.FG_THUMB_DISABLED)
+        self._eq_nav_subtitle.config(fg=theme.FG_SECONDARY if enabled else theme.FG_THUMB_DISABLED)
+        self._set_row_cursor(self._eq_row, "hand2" if enabled else "arrow")
 
     def _init_controller(self):
         """Initialise le contrôleur et se connecte au matériel."""
@@ -224,7 +283,8 @@ class MainWindow(tk.Tk):
 
         modes = self._controller.list_sound_modes()
         self._sound_mode_slugs = [slug for slug, _label in modes]
-        self._sound_mode_combo.config(values=[label for _slug, label in modes])
+        self._sound_mode_labels = [label for _slug, label in modes]
+        self._sound_mode_select.set_values(self._sound_mode_labels)
         self._select_sound_mode(self._controller.get_sound_mode())
         self._update_eq_button_label()
 
@@ -252,27 +312,28 @@ class MainWindow(tk.Tk):
         if not self._controller:
             return
 
-        for feature, switch, label in (
-            ("direct_mode", self._direct_toggle_switch, self._direct_toggle_label),
-            ("scout_mode", self._scout_toggle_switch, self._scout_toggle_label),
-            ("crystalvoice", self._crystalvoice_toggle_switch,
-             self._crystalvoice_toggle_label),
-        ):
+        for feature in ("direct_mode", "scout_mode", "crystalvoice"):
             if not self._controller.is_feature_supported(feature):
                 self._unavailable.add(feature)
-                switch.config(state=tk.DISABLED)
-                label.config(text=f"{label.cget('text')}\n(non implémenté)")
+                row = self._toggle_rows[feature]
+                row["switch"].set_enabled(False)
+                row["badge"].set_enabled(False)
+                row["title"].config(fg=theme.FG_SECONDARY)
+                row["subtitle"].config(
+                    text=f"{row['subtitle'].cget('text')}\n(non implémenté)",
+                    fg=theme.FG_SECONDARY,
+                )
 
         if not self._controller.is_feature_supported("sound_mode"):
             self._unavailable.add("sound_mode")
-            self._sound_mode_combo.config(state=tk.DISABLED)
+            self._sound_mode_select.set_enabled(False)
             self._sound_mode_label.config(
                 text=f"{self._sound_mode_label.cget('text')}\n(non implémenté)"
             )
 
         if not self._controller.is_feature_supported("eq"):
             self._unavailable.add("eq")
-            self._eq_nav_button.config(state=tk.DISABLED)
+            self._set_eq_nav_enabled(False)
 
     def _load_current_state(self):
         """Charge l'état actuel depuis le contrôleur."""
@@ -287,12 +348,12 @@ class MainWindow(tk.Tk):
         self._update_eq_button_label()
 
     def _select_sound_mode(self, slug: str) -> None:
-        """Positionne le Combobox sur le mode sonore donné (sans déclencher l'event)."""
+        """Positionne le SplitSelect sur le mode sonore donné (sans déclencher l'event)."""
         if slug in self._sound_mode_slugs:
-            self._sound_mode_combo.current(self._sound_mode_slugs.index(slug))
+            self._sound_mode_select.set_index(self._sound_mode_slugs.index(slug))
 
     def _update_eq_button_label(self) -> None:
-        """Rafraîchit la 2e ligne du bouton Équaliseur avec le mode actif."""
+        """Rafraîchit le sous-texte de la ligne Équaliseur avec le mode actif."""
         if not self._controller:
             return
         slug = self._controller.get_sound_mode()
@@ -301,7 +362,7 @@ class MainWindow(tk.Tk):
             if mode_slug == slug:
                 label = mode_label
                 break
-        self._eq_nav_button.config(text=f"Équaliseur\n{label}")
+        self._eq_nav_subtitle.config(text=label)
 
     # ------------------------------------------------------------------
     # Navigation entre pages (pas de fenêtre flottante)
@@ -310,16 +371,16 @@ class MainWindow(tk.Tk):
     def _show_main_page(self):
         """Affiche la page principale (masque le bouton retour)."""
         self._eq_page.pack_forget()
-        self._back_button.pack_forget()
-        self._title_label.config(text="Sound Blaster G8")
+        self._back_button.place_forget()
+        self._title_label.config(text="Sound Blaster G8", font=theme.FONT_TITLE)
         self._main_page.pack(expand=True, fill=tk.BOTH)
         self._fit_window_to_page()
 
     def _show_eq_page(self):
         """Affiche la page Égaliseur (avec bouton retour en haut à gauche)."""
         self._main_page.pack_forget()
-        self._back_button.pack(side=tk.LEFT, before=self._title_label)
-        self._title_label.config(text="Équaliseur")
+        self._back_button.place(x=24, rely=0.5, anchor="w")
+        self._title_label.config(text="Équaliseur", font=theme.FONT_TITLE_EQ)
         self._eq_page.pack(expand=True, fill=tk.BOTH)
         self._fit_window_to_page()
         self._prepare_eq_page_async()
@@ -394,7 +455,7 @@ class MainWindow(tk.Tk):
         requested = var.get()
         switch = self._switches.get(name)
         if switch is not None:
-            switch.config(state=tk.DISABLED)
+            switch.set_enabled(False)
         self._status_label.config(text=f"{label} : envoi de la commande…")
 
         def worker():
@@ -428,7 +489,7 @@ class MainWindow(tk.Tk):
         """Fin d'une bascule : réactive l'interrupteur et affiche l'état réel."""
         switch = self._switches.get(name)
         if switch is not None and name not in self._unavailable:
-            switch.config(state=tk.NORMAL)
+            switch.set_enabled(True)
 
         # État affiché : celui du matériel s'il a pu être relu, sinon celui
         # demandé (succès) ou l'ancien (échec).
@@ -469,18 +530,17 @@ class MainWindow(tk.Tk):
             lambda v: self._controller.set_crystalvoice(v),
         )
 
-    def _on_sound_mode_change(self, _event=None):
-        """Gère la sélection d'un mode sonore dans le Combobox."""
+    def _on_sound_mode_change(self, index: int):
+        """Gère la sélection d'un mode sonore dans le SplitSelect."""
         if not self._controller:
             return
 
-        index = self._sound_mode_combo.current()
         if index < 0 or index >= len(self._sound_mode_slugs):
             return
         slug = self._sound_mode_slugs[index]
-        label = self._sound_mode_combo.get()
+        label = self._sound_mode_labels[index]
 
-        self._sound_mode_combo.config(state=tk.DISABLED)
+        self._sound_mode_select.set_enabled(False)
         self._status_label.config(text=f"Mode Sonore « {label} » : envoi de la commande…")
 
         def worker():
@@ -501,9 +561,9 @@ class MainWindow(tk.Tk):
         ok: bool,
         error: Optional[Exception],
     ):
-        """Fin de la sélection d'un mode sonore : réactive le Combobox."""
+        """Fin de la sélection d'un mode sonore : réactive le SplitSelect."""
         if "sound_mode" not in self._unavailable:
-            self._sound_mode_combo.config(state="readonly")
+            self._sound_mode_select.set_enabled(True)
 
         # En cas d'échec, resynchroniser l'affichage sur l'état réel du contrôleur.
         self._select_sound_mode(self._controller.get_sound_mode())
