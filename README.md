@@ -10,8 +10,9 @@ sous **macOS** et **Linux** (Windows possible via hidapi, non testé).
 | **Scout Mode** | ✅ Fonctionnel | Trame validée sur le matériel, trafic USB identique à l'application Creative |
 | **Direct Mode** | ✅ Fonctionnel | Trame `0x39` validée, lecture d'état + reconnexion après le reset USB de la carte |
 | **Mode Sonore** | ✅ Fonctionnel | 51 modes (jeux, musique, égaliseurs génériques) reversés depuis des captures dédiées, trame `0x12` par paramètre |
+| **Égaliseur 10 bandes + Préampli** | ✅ Fonctionnel | Édition manuelle par slider, trame `0x12` par bande, validée sur le matériel |
+| **Basse / Aigus** | ⚠️ Approximatif | Pas de paramètre dédié sur la carte : réécrit les 10 bandes selon une courbe estimée depuis `Equalizer-manual.pcapng`, non garantie identique à Creative |
 | CrystalVoice | ⛔ Non implémenté | Trame USB non encore capturée |
-| Égaliseur 10 bandes (édition manuelle par slider) | ⛔ Non implémenté | La lecture/écriture d'une bande isolée n'est pas câblée ; seule l'application d'un mode sonore complet (ci-dessus) l'est |
 
 Les fonctions non implémentées sont grisées dans l'interface : elles ne
 prétendent pas agir sur la carte tant que la trame correspondante n'a pas été
@@ -251,26 +252,46 @@ ACK                           : 5a 02 0a 12 00 ...
 - param `0x01` : gain/compensation master
 - param `0x09` : égaliseur on/off
 - params `0x0b`–`0x14` : les 10 bandes de l'égaliseur, en dB
-- param `0x0a` : preset d'égaliseur (0 = manuel, constant observé)
+- param `0x0a` : **Préampli** (gain d'entrée, en dB)
+
+⚠️ `0x0a` valait `0.0` dans les 51 captures de mode sonore, ce qui avait
+d'abord laissé penser à un id de preset (« 0 = manuel »). La capture
+`Equalizer-manual.pcapng` (variations individuelles des sliders, glissée de
+`+6.1` à `-8.5`) montre que c'est en réalité un slider à part entière, au
+même titre qu'une bande - simplement laissé à 0 dB par tous les modes
+capturés.
 
 D'autres paramètres apparaissent selon les modes (`0x02`, `0x04`/`0x05`,
 `0x07`/`0x08`, `0x18`/`0x19`...), probablement des sous-réglages de
-l'« acoustic engine » (Crystalizer, Bass, Surround...) : leur rôle exact
-n'est pas identifié, mais rejouer la séquence complète capturée suffit à
-appliquer le mode correctement. Aucun reset USB n'est déclenché par ces
-écritures.
+l'« acoustic engine » (Crystalizer, Surround...) : leur rôle exact n'est pas
+identifié, mais rejouer la séquence complète capturée suffit à appliquer le
+mode correctement. Aucun reset USB n'est déclenché par ces écritures.
 
 Les séquences par mode sont générées depuis les captures par
 `tools/extract_sound_modes.py` dans `soundblaster_g8/sound_modes.py` (voir
 « Contribuer au reverse engineering » ci-dessous pour ajouter un mode).
 
-### À implémenter (pistes issues des captures)
+### Basse / Aigus (approximatif, pas de paramètre dédié)
 
-- Édition manuelle d'une bande EQ isolée depuis l'interface (slider) : le
-  mécanisme (`CMD_SET_FLOAT`) est connu, seule l'écriture bande-par-bande
-  n'est pas câblée dans `driver.eq_set_band`.
-- Rôle exact des paramètres secondaires listés ci-dessus (`0x02`, `0x04`,
-  `0x05`, `0x07`, `0x08`, `0x18`, `0x19`...).
+`Equalizer-manual.pcapng` montre que les sliders Basse et Aigus n'ont **pas**
+de paramètre propre : les bouger réécrit les 10 bandes existantes
+(`0x0b`-`0x14`) avec une courbe « tilt » (accentuation décroissante depuis une
+extrémité du spectre, l'autre extrémité restant inchangée). `controller
+.nudge_eq_tilt` applique une approximation linéaire de cette courbe,
+calibrée sur les deltas mesurés dans cette capture
+(`BASS_TILT_WEIGHTS`/`TREBLE_TILT_WEIGHTS` dans `controller.py`) : ce n'est
+**pas garanti identique** à l'algorithme réel de Creative, faute d'une
+capture paramétrique complète (plusieurs positions de slider isolées).
+
+### Activation de l'égaliseur
+
+`Equalizer-manual.pcapng` ne contient aucune écriture de `param 0x09` : l'app
+Creative active l'égaliseur ailleurs (probablement à l'ouverture de l'onglet
+EQ), pas à chaque geste sur un slider. Sans cela, les écritures de bandes
+sont bien acquittées par la carte mais restent inaudibles tant que le maître
+EQ est coupé (mode actif « Désactivé »). L'app active donc automatiquement
+`param 0x09` (`controller.ensure_eq_enabled`) à l'entrée sur la page
+Équaliseur.
 
 ## Contribuer au reverse engineering
 

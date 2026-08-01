@@ -144,7 +144,14 @@ toutes les captures observées, laissé tel quel).
     param 0x01        : gain/compensation master
     param 0x09        : égaliseur on/off (0/1)
     params 0x0b..0x14 : les 10 bandes de l'égaliseur, en dB
-    param 0x0a        : preset d'égaliseur (0 = manuel, constant observé)
+    param 0x0a        : Préampli (gain d'entrée, en dB)
+
+``param 0x0a`` valait ``0.0`` dans les 51 captures de mode sonore, ce qui
+avait initialement laissé penser à un id de preset (« 0 = manuel »). La
+capture ``Equalizer-manual.pcapng`` (variations individuelles des sliders)
+montre ce même paramètre glissé en continu de ``+6.1`` à ``-8.5``, exactement
+comme une bande EQ : c'est en réalité le slider **Préampli**, simplement
+laissé à 0 dB par tous les modes capturés.
 
 Un « mode sonore » de l'application Creative (un fichier ``Equalizer-*.pcapng``
 par mode dans les captures fournies) est une séquence ordonnée de ces
@@ -214,7 +221,7 @@ PARAM_DIRECT_MODE = 0x05
 PARAM_SBX_MASTER = 0x00  # SBX master (0/1)
 PARAM_MASTER_GAIN = 0x01  # gain/compensation master
 PARAM_EQ_ENABLED = 0x09  # égaliseur on/off (0/1)
-PARAM_EQ_PRESET = 0x0A  # preset d'égaliseur (0 = manuel)
+PARAM_PREAMP = 0x0A  # Préampli (gain d'entrée, en dB)
 EQ_BAND_PARAMS = tuple(range(0x0B, 0x15))  # les 10 bandes, en dB
 
 #: Préfixe constant observé dans toutes les écritures SET FLOAT.

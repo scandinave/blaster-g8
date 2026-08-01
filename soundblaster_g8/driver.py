@@ -943,6 +943,41 @@ class SoundBlasterG8Driver:
             _log(f"Mode sonore {'appliqué' if all_ok else 'partiellement appliqué'}")
             return all_ok
 
+    def eq_set_band(self, index: int, value: float) -> bool:
+        """Écrit une bande EQ isolée (même mécanisme que :meth:`set_sound_mode`).
+
+        Une bande n'est qu'un paramètre `CMD_SET_FLOAT` de plus : le param id
+        est `protocol.EQ_BAND_PARAMS[index]` (0x0b..0x14).
+        """
+        if not 0 <= index < len(protocol.EQ_BAND_PARAMS):
+            raise ValueError(f"index de bande hors limites: {index}")
+        return self.set_sound_mode_param(protocol.EQ_BAND_PARAMS[index], value)
+
+    def eq_get_all_bands(self) -> Optional[list[float]]:
+        """Dernières valeurs connues des 10 bandes (via le cache de notifications).
+
+        Comme pour :meth:`get_feature_cached`, la carte n'a pas de commande de
+        lecture dédiée : on se base sur les dumps ``PARAMS`` reçus après une
+        écriture. Retourne ``None`` tant qu'une bande n'a jamais été observée.
+        """
+        self.poll()
+        bands: list[float] = []
+        for param in protocol.EQ_BAND_PARAMS:
+            value = self._state.params.get(param)
+            if value is None:
+                return None
+            bands.append(value)
+        return bands
+
+    def eq_set_preamp(self, value: float) -> bool:
+        """Écrit le Préampli (param 0x0a), même mécanisme que :meth:`eq_set_band`."""
+        return self.set_sound_mode_param(protocol.PARAM_PREAMP, value)
+
+    def eq_get_preamp(self) -> Optional[float]:
+        """Dernière valeur connue du Préampli (même limite que :meth:`eq_get_all_bands`)."""
+        self.poll()
+        return self._state.params.get(protocol.PARAM_PREAMP)
+
     # ------------------------------------------------------------------
     # Fonctions non encore reversées
     # ------------------------------------------------------------------
@@ -959,14 +994,6 @@ class SoundBlasterG8Driver:
         return self._unsupported("CrystalVoice")
 
     def get_crystalvoice(self) -> Optional[bool]:
-        return None
-
-    def eq_set_band(self, index: int, value: float) -> bool:
-        if not 0 <= index < 10:
-            raise ValueError(f"index de bande hors limites: {index}")
-        return self._unsupported(f"Égaliseur (bande {index})")
-
-    def eq_get_all_bands(self) -> Optional[list[float]]:
         return None
 
     def eq_load_preset(self, preset_name: str) -> bool:

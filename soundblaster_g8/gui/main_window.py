@@ -6,6 +6,10 @@ Les commandes matérielles sont exécutées dans un thread de travail : une
 bascule du Direct Mode provoque un reset USB de la carte et prend 2 à 4
 secondes, ce qui gèlerait la fenêtre si elle était faite dans le callback Tk.
 Le résultat est rapatrié dans le thread graphique via ``self.after(0, ...)``.
+
+La fenêtre contient deux « pages » (page principale / page Égaliseur) dans un
+même conteneur, une seule visible à la fois (pas de fenêtre flottante) : voir
+``_show_main_page``/``_show_eq_page``.
 """
 
 import threading
@@ -14,6 +18,9 @@ from tkinter import ttk
 from typing import Callable, Optional
 
 from ..controller import SoundBlasterController
+from .eq_panel import EQPanel
+
+MIN_WINDOW_WIDTH = 600
 
 
 class MainWindow(tk.Tk):
@@ -24,7 +31,6 @@ class MainWindow(tk.Tk):
         super().__init__()
 
         self.title("Sound Blaster G8 - Control")
-        self.geometry("600x450")
         self.resizable(True, True)
 
         # Controller singleton
@@ -48,20 +54,60 @@ class MainWindow(tk.Tk):
         self._setup_ui()
 
     def _setup_ui(self):
-        """Configure l'interface utilisateur."""
-        # Titre
-        title_frame = tk.Frame(self, pady=10)
-        title_frame.pack(fill=tk.X)
+        """Configure l'interface utilisateur : en-tête, pages, barre de statut."""
+        self._setup_header()
 
-        title_label = tk.Label(
-            title_frame,
+        # Conteneur des pages : main_page et eq_page sont frères, une seule
+        # est empaquetée à la fois (voir _show_main_page/_show_eq_page).
+        self._pages_container = ttk.Frame(self)
+        self._pages_container.pack(expand=True, fill=tk.BOTH)
+
+        self._main_page = ttk.Frame(self._pages_container)
+        self._eq_page = ttk.Frame(self._pages_container)
+
+        self._setup_main_page(self._main_page)
+        # L'EQPanel a besoin du contrôleur : construit dans _init_controller.
+        self._eq_panel: Optional[EQPanel] = None
+
+        # Status bar (partagée entre les deux pages)
+        status_bar = tk.Frame(self, relief=tk.SUNKEN, bd=1)
+        status_bar.pack(fill=tk.X, side=tk.BOTTOM)
+
+        self._status_label = tk.Label(
+            status_bar,
+            text="Prêt",
+            anchor=tk.W
+        )
+        self._status_label.pack(expand=True, fill=tk.X, padx=5, pady=2)
+
+        self._show_main_page()
+
+        # Initialisation du controller
+        self._init_controller()
+
+        self._fit_window_to_page()
+
+    def _setup_header(self):
+        """En-tête commun : bouton retour (masqué sur la page principale) + titre."""
+        header_frame = tk.Frame(self, pady=10)
+        header_frame.pack(fill=tk.X)
+
+        self._back_button = ttk.Button(
+            header_frame, text="← Retour", command=self._show_main_page,
+        )
+        # Empaqueté/masqué dynamiquement par _show_main_page/_show_eq_page.
+
+        self._title_label = tk.Label(
+            header_frame,
             text="Sound Blaster G8",
             font=("Helvetica", 16, "bold")
         )
-        title_label.pack()
+        self._title_label.pack()
+        self._header_frame = header_frame
 
-         # Cadre des contrôles principaux
-        controls_frame = ttk.Frame(self, padding=20)
+    def _setup_main_page(self, controls_frame_parent):
+        """Construit le contenu de la page principale."""
+        controls_frame = ttk.Frame(controls_frame_parent, padding=20)
         controls_frame.pack(expand=True, fill=tk.BOTH)
 
           # Direct Mode - Cadre personnalisé pour le bouton avec texte sur deux lignes
@@ -150,30 +196,20 @@ class MainWindow(tk.Tk):
         self._sound_mode_combo.pack(side=tk.RIGHT)
         self._sound_mode_combo.bind("<<ComboboxSelected>>", self._on_sound_mode_change)
 
-        # Section EQ
-        eq_frame = ttk.LabelFrame(controls_frame, text="Égaliseur", padding=10)
+          # Équaliseur - même gabarit que les autres lignes, mais un seul
+          # bouton pleine largeur (pas de label séparé) : titre + mode actif.
+        eq_frame = ttk.Frame(controls_frame, padding=10)
         eq_frame.pack(fill=tk.X, pady=(0, 10))
 
-        self._eq_button = ttk.Button(
-            eq_frame,
-            text="Configurer\nAccès à l'égaliseur 10 bandes",
-            command=self._open_eq_panel
+        eq_inner_frame = tk.Frame(eq_frame)
+        eq_inner_frame.pack(expand=True, fill=tk.X, padx=10, pady=5)
+
+        self._eq_nav_button = ttk.Button(
+            eq_inner_frame,
+            text="Équaliseur",
+            command=self._show_eq_page,
          )
-        self._eq_button.pack(side=tk.LEFT, expand=True, fill=tk.X)
-
-        # Status bar
-        status_bar = tk.Frame(self, relief=tk.SUNKEN, bd=1)
-        status_bar.pack(fill=tk.X, side=tk.BOTTOM)
-
-        self._status_label = tk.Label(
-            status_bar,
-            text="Prêt",
-            anchor=tk.W
-        )
-        self._status_label.pack(expand=True, fill=tk.X, padx=5, pady=2)
-
-        # Initialisation du controller
-        self._init_controller()
+        self._eq_nav_button.pack(expand=True, fill=tk.X)
 
     def _init_controller(self):
         """Initialise le contrôleur et se connecte au matériel."""
@@ -190,6 +226,13 @@ class MainWindow(tk.Tk):
         self._sound_mode_slugs = [slug for slug, _label in modes]
         self._sound_mode_combo.config(values=[label for _slug, label in modes])
         self._select_sound_mode(self._controller.get_sound_mode())
+        self._update_eq_button_label()
+
+        self._eq_panel = EQPanel(
+            self._eq_page, self._controller,
+            status_callback=lambda text: self._status_label.config(text=text),
+        )
+        self._eq_panel.pack(fill=tk.BOTH, expand=True)
 
         if self._controller.connect():
             info = self._controller.get_debug_info()
@@ -228,7 +271,8 @@ class MainWindow(tk.Tk):
             )
 
         if not self._controller.is_feature_supported("eq"):
-            self._eq_button.config(state=tk.DISABLED)
+            self._unavailable.add("eq")
+            self._eq_nav_button.config(state=tk.DISABLED)
 
     def _load_current_state(self):
         """Charge l'état actuel depuis le contrôleur."""
@@ -240,11 +284,82 @@ class MainWindow(tk.Tk):
         self._scout_mode_var.set(self._controller.get_scout_mode())
         self._crystalvoice_var.set(self._controller.get_crystalvoice())
         self._select_sound_mode(self._controller.get_sound_mode())
+        self._update_eq_button_label()
 
     def _select_sound_mode(self, slug: str) -> None:
         """Positionne le Combobox sur le mode sonore donné (sans déclencher l'event)."""
         if slug in self._sound_mode_slugs:
             self._sound_mode_combo.current(self._sound_mode_slugs.index(slug))
+
+    def _update_eq_button_label(self) -> None:
+        """Rafraîchit la 2e ligne du bouton Équaliseur avec le mode actif."""
+        if not self._controller:
+            return
+        slug = self._controller.get_sound_mode()
+        label = slug
+        for mode_slug, mode_label in self._controller.list_sound_modes():
+            if mode_slug == slug:
+                label = mode_label
+                break
+        self._eq_nav_button.config(text=f"Équaliseur\n{label}")
+
+    # ------------------------------------------------------------------
+    # Navigation entre pages (pas de fenêtre flottante)
+    # ------------------------------------------------------------------
+
+    def _show_main_page(self):
+        """Affiche la page principale (masque le bouton retour)."""
+        self._eq_page.pack_forget()
+        self._back_button.pack_forget()
+        self._title_label.config(text="Sound Blaster G8")
+        self._main_page.pack(expand=True, fill=tk.BOTH)
+        self._fit_window_to_page()
+
+    def _show_eq_page(self):
+        """Affiche la page Égaliseur (avec bouton retour en haut à gauche)."""
+        self._main_page.pack_forget()
+        self._back_button.pack(side=tk.LEFT, before=self._title_label)
+        self._title_label.config(text="Équaliseur")
+        self._eq_page.pack(expand=True, fill=tk.BOTH)
+        self._fit_window_to_page()
+        self._prepare_eq_page_async()
+
+    def _prepare_eq_page_async(self):
+        """Prépare l'égaliseur (active + applique un état plat si besoin).
+
+        Comportement de l'app Creative native : si aucun égaliseur n'est
+        déjà actif (mode « Désactivé »), applique un égaliseur plat (10
+        bandes + Préampli à 0 dB) et l'active - sans quoi les écritures de
+        bandes seraient bien acquittées par la carte mais resteraient
+        inaudibles. Si un mode est déjà actif, ne fait rien. Ne bloque pas
+        l'affichage : les sliders restent utilisables immédiatement.
+        """
+        if not self._controller:
+            return
+
+        def worker():
+            try:
+                ok = bool(self._controller.prepare_eq_page())
+            except Exception as exc:  # pragma: no cover - dépend du matériel
+                self.after(0, lambda: self._status_label.config(
+                    text=f"Activation de l'égaliseur : erreur ({exc})"
+                ))
+                return
+            if ok:
+                def on_success():
+                    self._status_label.config(text="Égaliseur activé")
+                    if self._eq_panel is not None:
+                        self._eq_panel.refresh()
+                self.after(0, on_success)
+
+        threading.Thread(target=worker, name="g8-eq-enable", daemon=True).start()
+
+    def _fit_window_to_page(self):
+        """Redimensionne la fenêtre pour que la page affichée tienne entière."""
+        self.update_idletasks()
+        width = max(MIN_WINDOW_WIDTH, self.winfo_reqwidth())
+        height = self.winfo_reqheight()
+        self.geometry(f"{width}x{height}")
 
     # ------------------------------------------------------------------
     # Bascules (exécutées hors du thread graphique)
@@ -392,6 +507,9 @@ class MainWindow(tk.Tk):
 
         # En cas d'échec, resynchroniser l'affichage sur l'état réel du contrôleur.
         self._select_sound_mode(self._controller.get_sound_mode())
+        self._update_eq_button_label()
+        if self._eq_panel is not None:
+            self._eq_panel.refresh()
 
         if error is not None:
             self._status_label.config(text=f"Mode Sonore : erreur ({error})")
@@ -401,8 +519,3 @@ class MainWindow(tk.Tk):
             self._status_label.config(
                 text=f"Mode Sonore « {label} » : échec de la commande (voir la console)"
             )
-
-    def _open_eq_panel(self):
-        """Ouvre le panneau d'égaliseur."""
-        from .eq_panel import EQPanel
-        eq_window = EQPanel(self, self._controller)

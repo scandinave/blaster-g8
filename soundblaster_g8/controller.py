@@ -9,11 +9,23 @@ carte n'a pas répondu.
 
 from typing import Callable, Optional
 
+from . import protocol
 from .driver import SoundBlasterG8Driver, get_driver
 from .sound_modes import DEFAULT_SOUND_MODE, SOUND_MODES
 
 #: Fonctions dont la trame USB a été identifiée et validée sur le matériel.
-SUPPORTED_FEATURES = frozenset({"scout_mode", "direct_mode", "sound_mode"})
+SUPPORTED_FEATURES = frozenset({"scout_mode", "direct_mode", "sound_mode", "eq"})
+
+#: Poids « tilt » pour les sliders Basse/Aigus (bandes 0x0b..0x14, dans cet
+#: ordre). Ces deux sliders n'ont pas de paramètre dédié sur la carte : dans
+#: la capture ``Equalizer-manual.pcapng``, les bouger réécrit les 10 bandes
+#: existantes avec une courbe décroissante depuis une extrémité du spectre.
+#: Les poids ci-dessous sont les deltas mesurés dans cette capture, normalisés
+#: pour qu'un slider à +12 dB reproduise le geste capturé : c'est une
+#: **approximation** de l'algorithme réel de Creative, pas une valeur
+#: garantie identique.
+BASS_TILT_WEIGHTS = (0.27061, 0.28224, 0.20667, 0.10533, 0.044, 0.012, 0.0, 0.0, 0.0, 0.0)
+TREBLE_TILT_WEIGHTS = (0.0, 0.0, 0.0, 0.00773, 0.02591, 0.04182, 0.09182, 0.19955, 0.34167, 0.35637)
 
 
 class SoundBlasterController:
@@ -37,6 +49,14 @@ class SoundBlasterController:
         self._scout_mode = False
         self._crystalvoice = False
         self._eq_bands: list[float] = [0.0] * self.NUM_BANDS
+        self._eq_preamp: float = 0.0
+        self._eq_enabled: bool = False
+        # Position persistante des sliders Basse/Aigus (voir set_eq_bass/
+        # set_eq_treble) : contrairement aux bandes, ce ne sont pas des
+        # paramètres de la carte mais une position UI dont on déduit un
+        # delta à chaque changement.
+        self._eq_bass: float = 0.0
+        self._eq_treble: float = 0.0
         self._sound_mode: str = DEFAULT_SOUND_MODE
 
         # Listeners pour les événements (pour notification à la GUI)
@@ -46,6 +66,10 @@ class SoundBlasterController:
             "crystalvoice_changed": [],
             "eq_band_changed": [],
             "eq_all_bands_changed": [],
+            "eq_preamp_changed": [],
+            "eq_enabled_changed": [],
+            "eq_bass_changed": [],
+            "eq_treble_changed": [],
             "sound_mode_changed": [],
             "command_failed": [],
             # (bool) : True quand la carte se réénumère (bascule du Direct
@@ -113,6 +137,14 @@ class SoundBlasterController:
             bands = None
         if bands:
             self._eq_bands = list(bands)
+
+        try:
+            preamp = self._driver.eq_get_preamp()
+        except Exception as exc:
+            print(f"[SoundBlasterController] Lecture du Préampli impossible: {exc}")
+            preamp = None
+        if preamp is not None:
+            self._eq_preamp = preamp
 
         print("[SoundBlasterController] État initial chargé")
 
@@ -221,8 +253,19 @@ class SoundBlasterController:
         if ok:
             self._sound_mode = slug
             self._eq_bands = list(mode.bands)
+            self._eq_preamp = mode.preamp
+            self._eq_enabled = mode.eq_enabled
+            # Un nouveau mode remplace intégralement les bandes : l'ancienne
+            # position de Basse/Aigus (delta depuis une base qui n'existe
+            # plus) n'a plus de sens.
+            self._eq_bass = 0.0
+            self._eq_treble = 0.0
             self._notify("sound_mode_changed", slug)
             self._notify("eq_all_bands_changed", self._eq_bands)
+            self._notify("eq_preamp_changed", self._eq_preamp)
+            self._notify("eq_enabled_changed", self._eq_enabled)
+            self._notify("eq_bass_changed", 0.0)
+            self._notify("eq_treble_changed", 0.0)
         else:
             self._notify("command_failed", "sound_mode", slug)
         return ok
@@ -274,6 +317,109 @@ class SoundBlasterController:
 
     def get_eq_all_bands(self) -> list[float]:
         return self._eq_bands.copy()
+
+    def set_eq_preamp(self, value: float) -> bool:
+        """Règle le Préampli, avec la même validation que :meth:`set_eq_band`."""
+        clamped = max(self.MIN_EQ_VALUE, min(self.MAX_EQ_VALUE, value))
+        ok = bool(self._driver.eq_set_preamp(clamped))
+        self._eq_preamp = clamped
+        self._notify("eq_preamp_changed", clamped)
+        if not ok:
+            self._notify("command_failed", "eq_preamp", clamped)
+        return ok
+
+    def get_eq_preamp(self) -> float:
+        return self._eq_preamp
+
+    def prepare_eq_page(self) -> bool:
+        """Prépare l'égaliseur pour l'édition manuelle : l'active si besoin.
+
+        Comportement de l'app Creative native à l'ouverture de l'onglet
+        Équaliseur : si aucun égaliseur n'est déjà actif (mode « Désactivé »),
+        applique un égaliseur **plat** (10 bandes + Préampli à 0 dB) et
+        l'active, plutôt que de se contenter de positionner le bit
+        ``param 0x09`` en laissant les bandes intactes - sans quoi les
+        écritures de bandes sont bien acquittées par la carte mais restent
+        inaudibles tant que le maître EQ est coupé. Si un mode est déjà actif
+        (donc déjà audible), ne touche à rien.
+        """
+        if self._eq_enabled:
+            return True
+
+        writes: list[tuple[int, float]] = [(protocol.PARAM_EQ_ENABLED, 1.0)]
+        writes += [(param, 0.0) for param in protocol.EQ_BAND_PARAMS]
+        writes.append((protocol.PARAM_PREAMP, 0.0))
+
+        ok = bool(self._driver.set_sound_mode(writes))
+        if ok:
+            self._eq_enabled = True
+            self._eq_bands = [0.0] * self.NUM_BANDS
+            self._eq_preamp = 0.0
+            self._eq_bass = 0.0
+            self._eq_treble = 0.0
+            self._notify("eq_enabled_changed", True)
+            self._notify("eq_all_bands_changed", self._eq_bands.copy())
+            self._notify("eq_preamp_changed", 0.0)
+            self._notify("eq_bass_changed", 0.0)
+            self._notify("eq_treble_changed", 0.0)
+        else:
+            self._notify("command_failed", "eq_enabled", True)
+        return ok
+
+    def set_eq_bass(self, value: float) -> bool:
+        """Règle la position du slider Basse (approximatif, persistant).
+
+        Voir ``BASS_TILT_WEIGHTS`` : ``value`` est une position absolue
+        (-12..12 dB, même plage que les bandes), pas un delta.
+        """
+        return self._set_tilt_slider("_eq_bass", "eq_bass_changed", BASS_TILT_WEIGHTS, value)
+
+    def get_eq_bass(self) -> float:
+        return self._eq_bass
+
+    def set_eq_treble(self, value: float) -> bool:
+        """Règle la position du slider Aigus (approximatif, persistant)."""
+        return self._set_tilt_slider(
+            "_eq_treble", "eq_treble_changed", TREBLE_TILT_WEIGHTS, value
+        )
+
+    def get_eq_treble(self) -> float:
+        return self._eq_treble
+
+    def _set_tilt_slider(
+        self, attr: str, event: str, weights: tuple[float, ...], value: float,
+    ) -> bool:
+        """Applique un déplacement de slider Basse/Aigus sur les 10 bandes.
+
+        Approximation dérivée de ``Equalizer-manual.pcapng`` (voir
+        ``BASS_TILT_WEIGHTS``/``TREBLE_TILT_WEIGHTS``) : contrairement à une
+        bande ou au Préampli, il n'y a pas de paramètre dédié sur la carte -
+        seul le **delta** depuis la position précédente du slider est
+        pondéré par bande et ajouté à l'état actuel, ce qui permet au slider
+        de rester où l'utilisateur l'a posé (un aller-retour annule
+        exactement son propre effet).
+        """
+        clamped = max(self.MIN_EQ_VALUE, min(self.MAX_EQ_VALUE, value))
+        delta = clamped - getattr(self, attr)
+
+        all_ok = True
+        if delta != 0.0:
+            for i, weight in enumerate(weights):
+                if weight == 0.0:
+                    continue
+                band_value = max(
+                    self.MIN_EQ_VALUE, min(self.MAX_EQ_VALUE, self._eq_bands[i] + delta * weight)
+                )
+                self._eq_bands[i] = band_value
+                if not self._driver.eq_set_band(i, band_value):
+                    all_ok = False
+            self._notify("eq_all_bands_changed", self._eq_bands.copy())
+
+        setattr(self, attr, clamped)
+        self._notify(event, clamped)
+        if not all_ok:
+            self._notify("command_failed", attr.lstrip("_"), clamped)
+        return all_ok
 
     def load_preset(self, preset_name: str) -> bool:
         """Charge un preset prédéfini.

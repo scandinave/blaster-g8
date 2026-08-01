@@ -31,9 +31,11 @@ from soundblaster_g8 import protocol  # noqa: E402
 PAYLOAD_OFFSET = 36
 REPORT_SIZE = 64
 
-# Fichier de capture qui n'est pas un mode (juste un bascule on/off de
-# l'égaliseur maître) : exclu de la génération.
-EXCLUDED_FILENAMES = {"Equalizer.pcapng"}
+# Fichiers de capture qui ne sont pas des modes (juste un bascule on/off de
+# l'égaliseur maître, ou une session de calibration des sliders individuels
+# utilisée pour reverse-engineer Préampli/Basse/Aigus) : exclus de la
+# génération.
+EXCLUDED_FILENAMES = {"Equalizer.pcapng", "Equalizer-manual.pcapng"}
 
 # Capture correspondant au mode par défaut (aucun égaliseur actif).
 DEFAULT_SOURCE = "Equalizer-effects-disabled.pcapng"
@@ -119,6 +121,14 @@ def bands_from_writes(writes: list[tuple[int, float]]) -> tuple[float, ...]:
     return tuple(by_param.get(p, 0.0) for p in protocol.EQ_BAND_PARAMS)
 
 
+def preamp_from_writes(writes: list[tuple[int, float]]) -> float:
+    return dict(writes).get(protocol.PARAM_PREAMP, 0.0)
+
+
+def eq_enabled_from_writes(writes: list[tuple[int, float]]) -> bool:
+    return bool(dict(writes).get(protocol.PARAM_EQ_ENABLED, 0.0))
+
+
 def format_writes(writes: list[tuple[int, float]]) -> str:
     return "(" + ", ".join(f"(0x{p:02x}, {v!r})" for p, v in writes) + ")"
 
@@ -133,7 +143,7 @@ def generate(input_dir: Path, output_path: Path) -> None:
     if not pcap_files:
         raise SystemExit(f"Aucun fichier .pcapng trouvé dans {input_dir}")
 
-    modes: list[tuple[str, str, list[tuple[int, float]], tuple[float, ...]]] = []
+    modes: list[tuple[str, str, list[tuple[int, float]], tuple[float, ...], float, bool]] = []
     for path in pcap_files:
         frames = extract_set_report_requests(path)
         writes = decode_float_writes(frames)
@@ -153,7 +163,9 @@ def generate(input_dir: Path, output_path: Path) -> None:
         slug = slug_from_filename(path)
         label = label_from_slug(slug)
         bands = bands_from_writes(writes)
-        modes.append((slug, label, writes, bands))
+        preamp = preamp_from_writes(writes)
+        eq_enabled = eq_enabled_from_writes(writes)
+        modes.append((slug, label, writes, bands, preamp, eq_enabled))
         print(f"  {path.name:<45} -> slug={slug!r:<25} ({len(writes)} écritures)")
 
     # Le mode par défaut en premier, puis ordre alphabétique du label.
@@ -183,18 +195,24 @@ def generate(input_dir: Path, output_path: Path) -> None:
         "    writes: tuple[tuple[int, float], ...]",
         "    #: Les 10 bandes d'égaliseur, en dB (dérivées de ``writes``).",
         "    bands: tuple[float, ...]",
+        "    #: Préampli (param 0x0a), en dB (dérivé de ``writes``).",
+        "    preamp: float",
+        "    #: Égaliseur actif ou non (param 0x09, dérivé de ``writes``).",
+        "    eq_enabled: bool",
         "",
         "",
         f"DEFAULT_SOUND_MODE = {DEFAULT_SLUG!r}",
         "",
         "SOUND_MODES: dict[str, SoundMode] = {",
     ]
-    for slug, label, writes, bands in modes:
+    for slug, label, writes, bands, preamp, eq_enabled in modes:
         lines.append(f"    {slug!r}: SoundMode(")
         lines.append(f"        slug={slug!r},")
         lines.append(f"        label={label!r},")
         lines.append(f"        writes={format_writes(writes)},")
         lines.append(f"        bands={format_bands(bands)},")
+        lines.append(f"        preamp={preamp!r},")
+        lines.append(f"        eq_enabled={eq_enabled!r},")
         lines.append("    ),")
     lines.append("}")
     lines.append("")
