@@ -10,9 +10,10 @@ carte n'a pas répondu.
 from typing import Callable, Optional
 
 from .driver import SoundBlasterG8Driver, get_driver
+from .sound_modes import DEFAULT_SOUND_MODE, SOUND_MODES
 
 #: Fonctions dont la trame USB a été identifiée et validée sur le matériel.
-SUPPORTED_FEATURES = frozenset({"scout_mode", "direct_mode"})
+SUPPORTED_FEATURES = frozenset({"scout_mode", "direct_mode", "sound_mode"})
 
 
 class SoundBlasterController:
@@ -36,6 +37,7 @@ class SoundBlasterController:
         self._scout_mode = False
         self._crystalvoice = False
         self._eq_bands: list[float] = [0.0] * self.NUM_BANDS
+        self._sound_mode: str = DEFAULT_SOUND_MODE
 
         # Listeners pour les événements (pour notification à la GUI)
         self._listeners: dict[str, list[Callable]] = {
@@ -44,6 +46,7 @@ class SoundBlasterController:
             "crystalvoice_changed": [],
             "eq_band_changed": [],
             "eq_all_bands_changed": [],
+            "sound_mode_changed": [],
             "command_failed": [],
             # (bool) : True quand la carte se réénumère (bascule du Direct
             # Mode), False quand la reconnexion est terminée.
@@ -181,6 +184,48 @@ class SoundBlasterController:
         if state is not None:
             self._direct_mode = bool(state)
         return self._direct_mode
+
+    # ------------------------------------------------------------------
+    # Mode sonore (supporté)
+    # ------------------------------------------------------------------
+
+    def list_sound_modes(self) -> list[tuple[str, str]]:
+        """Liste ``(slug, label)`` des modes sonores disponibles.
+
+        Ordre : mode par défaut (``Désactivé``) en premier, puis ordre
+        alphabétique des labels (ordre déjà utilisé par
+        :mod:`soundblaster_g8.sound_modes`).
+        """
+        return [(mode.slug, mode.label) for mode in SOUND_MODES.values()]
+
+    def get_sound_mode(self) -> str:
+        """Retourne le slug du mode sonore actif (état local uniquement).
+
+        Aucune trame de lecture du mode actif n'a été identifiée dans les
+        captures (comme pour le Scout Mode) : l'état suit simplement la
+        dernière commande envoyée avec succès.
+        """
+        return self._sound_mode
+
+    def set_sound_mode(self, slug: str) -> bool:
+        """Applique un mode sonore (égaliseur + acoustic engine).
+
+        Returns:
+            ``True`` si la carte a acquitté toutes les trames de la séquence.
+        """
+        mode = SOUND_MODES.get(slug)
+        if mode is None:
+            raise ValueError(f"Mode sonore inconnu: {slug}")
+
+        ok = bool(self._driver.set_sound_mode(list(mode.writes)))
+        if ok:
+            self._sound_mode = slug
+            self._eq_bands = list(mode.bands)
+            self._notify("sound_mode_changed", slug)
+            self._notify("eq_all_bands_changed", self._eq_bands)
+        else:
+            self._notify("command_failed", "sound_mode", slug)
+        return ok
 
     # ------------------------------------------------------------------
     # Fonctions non encore reversées

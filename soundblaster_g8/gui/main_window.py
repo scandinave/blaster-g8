@@ -35,6 +35,10 @@ class MainWindow(tk.Tk):
         self._scout_mode_var = tk.BooleanVar(value=False)
         self._crystalvoice_var = tk.BooleanVar(value=False)
 
+        # Mode sonore : liste (slug, label) et variable liée au Combobox.
+        self._sound_mode_slugs: list[str] = []
+        self._sound_mode_var = tk.StringVar(value="")
+
         # Interrupteurs indisponibles (fonction non reversée) : ils ne doivent
         # pas être réactivés à la fin d'une commande.
         self._unavailable: set[str] = set()
@@ -123,6 +127,29 @@ class MainWindow(tk.Tk):
            )
         self._crystalvoice_toggle_switch.pack(side=tk.RIGHT)
 
+          # Mode Sonore - sélection parmi les modes reversés depuis les captures
+        sound_mode_frame = ttk.Frame(controls_frame, padding=10)
+        sound_mode_frame.pack(fill=tk.X, pady=(0, 10))
+
+        self._sound_mode_inner_frame = tk.Frame(sound_mode_frame)
+        self._sound_mode_inner_frame.pack(expand=True, fill=tk.X, padx=10, pady=5)
+
+        self._sound_mode_label = ttk.Label(
+            self._sound_mode_inner_frame,
+            text="Mode Sonore\nÉgaliseur et acoustic engine",
+            justify=tk.LEFT
+           )
+        self._sound_mode_label.pack(side=tk.LEFT, expand=True, fill=tk.X)
+
+        self._sound_mode_combo = ttk.Combobox(
+            self._sound_mode_inner_frame,
+            textvariable=self._sound_mode_var,
+            state="readonly",
+            width=28,
+           )
+        self._sound_mode_combo.pack(side=tk.RIGHT)
+        self._sound_mode_combo.bind("<<ComboboxSelected>>", self._on_sound_mode_change)
+
         # Section EQ
         eq_frame = ttk.LabelFrame(controls_frame, text="Égaliseur", padding=10)
         eq_frame.pack(fill=tk.X, pady=(0, 10))
@@ -159,6 +186,11 @@ class MainWindow(tk.Tk):
         }
         self._controller.add_listener("reconnecting", self._on_reconnecting)
 
+        modes = self._controller.list_sound_modes()
+        self._sound_mode_slugs = [slug for slug, _label in modes]
+        self._sound_mode_combo.config(values=[label for _slug, label in modes])
+        self._select_sound_mode(self._controller.get_sound_mode())
+
         if self._controller.connect():
             info = self._controller.get_debug_info()
             self._status_label.config(
@@ -188,6 +220,13 @@ class MainWindow(tk.Tk):
                 switch.config(state=tk.DISABLED)
                 label.config(text=f"{label.cget('text')}\n(non implémenté)")
 
+        if not self._controller.is_feature_supported("sound_mode"):
+            self._unavailable.add("sound_mode")
+            self._sound_mode_combo.config(state=tk.DISABLED)
+            self._sound_mode_label.config(
+                text=f"{self._sound_mode_label.cget('text')}\n(non implémenté)"
+            )
+
         if not self._controller.is_feature_supported("eq"):
             self._eq_button.config(state=tk.DISABLED)
 
@@ -200,6 +239,12 @@ class MainWindow(tk.Tk):
         self._direct_mode_var.set(self._controller.get_direct_mode())
         self._scout_mode_var.set(self._controller.get_scout_mode())
         self._crystalvoice_var.set(self._controller.get_crystalvoice())
+        self._select_sound_mode(self._controller.get_sound_mode())
+
+    def _select_sound_mode(self, slug: str) -> None:
+        """Positionne le Combobox sur le mode sonore donné (sans déclencher l'event)."""
+        if slug in self._sound_mode_slugs:
+            self._sound_mode_combo.current(self._sound_mode_slugs.index(slug))
 
     # ------------------------------------------------------------------
     # Bascules (exécutées hors du thread graphique)
@@ -308,6 +353,54 @@ class MainWindow(tk.Tk):
             "crystalvoice", "CrystalVoice", self._crystalvoice_var,
             lambda v: self._controller.set_crystalvoice(v),
         )
+
+    def _on_sound_mode_change(self, _event=None):
+        """Gère la sélection d'un mode sonore dans le Combobox."""
+        if not self._controller:
+            return
+
+        index = self._sound_mode_combo.current()
+        if index < 0 or index >= len(self._sound_mode_slugs):
+            return
+        slug = self._sound_mode_slugs[index]
+        label = self._sound_mode_combo.get()
+
+        self._sound_mode_combo.config(state=tk.DISABLED)
+        self._status_label.config(text=f"Mode Sonore « {label} » : envoi de la commande…")
+
+        def worker():
+            error: Optional[Exception] = None
+            ok = False
+            try:
+                ok = bool(self._controller.set_sound_mode(slug))
+            except Exception as exc:  # pragma: no cover - dépend du matériel
+                error = exc
+            self.after(0, lambda: self._finish_sound_mode_change(slug, label, ok, error))
+
+        threading.Thread(target=worker, name="g8-sound_mode", daemon=True).start()
+
+    def _finish_sound_mode_change(
+        self,
+        slug: str,
+        label: str,
+        ok: bool,
+        error: Optional[Exception],
+    ):
+        """Fin de la sélection d'un mode sonore : réactive le Combobox."""
+        if "sound_mode" not in self._unavailable:
+            self._sound_mode_combo.config(state="readonly")
+
+        # En cas d'échec, resynchroniser l'affichage sur l'état réel du contrôleur.
+        self._select_sound_mode(self._controller.get_sound_mode())
+
+        if error is not None:
+            self._status_label.config(text=f"Mode Sonore : erreur ({error})")
+        elif ok:
+            self._status_label.config(text=f"Mode Sonore « {label} » appliqué")
+        else:
+            self._status_label.config(
+                text=f"Mode Sonore « {label} » : échec de la commande (voir la console)"
+            )
 
     def _open_eq_panel(self):
         """Ouvre le panneau d'égaliseur."""

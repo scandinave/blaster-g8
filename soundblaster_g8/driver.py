@@ -897,6 +897,53 @@ class SoundBlasterG8Driver:
         return frame.direct_mode_enabled
 
     # ------------------------------------------------------------------
+    # Mode sonore / égaliseur (confirmé par les captures « Sound Mode »)
+    # ------------------------------------------------------------------
+
+    def set_sound_mode_param(self, param: int, value: float) -> bool:
+        """Envoie une écriture CMD_SET_FLOAT unique et vérifie l'ACK."""
+        if self._device is None:
+            _log(f"[simulation] SET_FLOAT param=0x{param:02x} value={value}")
+            return False
+
+        try:
+            # build_set_float() retourne une trame déjà complète (comme
+            # build_direct_mode()) : passer par _send_raw directement, pas
+            # par send_frame() qui re-wrapperait le payload dans une trame.
+            ack = self._send_raw(protocol.build_set_float(param, value), expect="ack")
+        except SoundBlasterG8Error as exc:
+            _log(f"ERREUR SET_FLOAT param=0x{param:02x}: {exc}")
+            return False
+
+        if ack is None or ack.ack_command != protocol.CMD_SET_FLOAT or not ack.ack_ok:
+            _log(
+                f"AVERTISSEMENT: pas d'ACK valide pour param=0x{param:02x} "
+                f"({ack.describe() if ack else 'timeout'})"
+            )
+            return False
+        return True
+
+    def set_sound_mode(self, writes: list[tuple[int, float]]) -> bool:
+        """Rejoue une séquence d'écritures CMD_SET_FLOAT (un mode sonore).
+
+        L'ordre de la séquence est celui de la capture USB d'origine (voir
+        :mod:`soundblaster_g8.sound_modes`) : il doit être préservé tel quel.
+        Contrairement au Direct Mode, ces écritures ne provoquent pas de reset
+        USB de la carte.
+
+        Returns:
+            ``True`` seulement si **toutes** les écritures ont été acquittées.
+        """
+        _log(f"Mode sonore : envoi de {len(writes)} paramètre(s)")
+        with self._io_lock:
+            all_ok = True
+            for param, value in writes:
+                if not self.set_sound_mode_param(param, value):
+                    all_ok = False
+            _log(f"Mode sonore {'appliqué' if all_ok else 'partiellement appliqué'}")
+            return all_ok
+
+    # ------------------------------------------------------------------
     # Fonctions non encore reversées
     # ------------------------------------------------------------------
 

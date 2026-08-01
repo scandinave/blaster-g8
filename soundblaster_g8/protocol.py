@@ -128,13 +128,32 @@ Payload d'un dump de paramètres (type 0x11)
     ex. ``96 05 a4 70 3d 3f`` -> param 0x05 = 0.74
         ``96 00 00 00 80 3f`` -> param 0x00 = 1.0
 
-Pistes non implémentées (deuxième passe)
-----------------------------------------
-* ``cmd 0x12`` (:data:`CMD_SET_FLOAT`) : écriture d'un float32.
-* param ``0x09`` : égaliseur on/off.
-* params ``0x0b``..``0x14`` : les 10 bandes de l'égaliseur, en dB.
-* param ``0x0a`` : preset d'égaliseur.
-* param ``0x00`` : master SBX.
+Payload d'une commande SET FLOAT (type 0x12) - confirmé par les captures
+« Sound Mode »
+-------------------------------------------------------------------------
+    +------+------+----------+-----------------+
+    | 0x01 | 0x96 | param id | valeur f32 LE    |
+    +------+------+----------+-----------------+
+
+``0x96`` est le même marqueur TLV que celui des entrées d'un dump de
+paramètres (type 0x11) : une écriture ``0x12`` a donc la même forme qu'une
+entrée de lecture, préfixée par ``0x01`` (rôle non identifié - constant dans
+toutes les captures observées, laissé tel quel).
+
+    param 0x00        : SBX master (0/1)
+    param 0x01        : gain/compensation master
+    param 0x09        : égaliseur on/off (0/1)
+    params 0x0b..0x14 : les 10 bandes de l'égaliseur, en dB
+    param 0x0a        : preset d'égaliseur (0 = manuel, constant observé)
+
+Un « mode sonore » de l'application Creative (un fichier ``Equalizer-*.pcapng``
+par mode dans les captures fournies) est une séquence ordonnée de ces
+écritures ``0x12`` ; l'ACK carte est ``5a 02 0a 12 00 ...``
+(``Frame.ack_command``/``Frame.ack_status``/``Frame.ack_ok`` suffisent, le
+layout de l'ACK ne suit pas celui de ``0x26``). Aucun reset USB n'est
+déclenché par ces écritures. Voir :mod:`soundblaster_g8.sound_modes` pour les
+séquences extraites des captures et :func:`build_set_float` pour
+l'encodage.
 """
 
 from __future__ import annotations
@@ -189,6 +208,17 @@ SCOUT_MODE = (FEATURE_SCOUT, PARAM_SCOUT_ENABLED)
 # Direct Mode - identifiants extraits des captures USB
 FEATURE_DIRECT_MODE = 0x00
 PARAM_DIRECT_MODE = 0x05
+
+# Mode sonore / égaliseur - identifiants de paramètres extraits des captures
+# « Sound Mode » (commande CMD_SET_FLOAT, type 0x12).
+PARAM_SBX_MASTER = 0x00  # SBX master (0/1)
+PARAM_MASTER_GAIN = 0x01  # gain/compensation master
+PARAM_EQ_ENABLED = 0x09  # égaliseur on/off (0/1)
+PARAM_EQ_PRESET = 0x0A  # preset d'égaliseur (0 = manuel)
+EQ_BAND_PARAMS = tuple(range(0x0B, 0x15))  # les 10 bandes, en dB
+
+#: Préfixe constant observé dans toutes les écritures SET FLOAT.
+SET_FLOAT_PREFIX = 0x01
 
 #: Payload de la requête d'état du Direct Mode (type 0x39).
 DIRECT_MODE_STATUS_PAYLOAD = b"\x01\x20\x00\x00\x00"
@@ -447,6 +477,20 @@ def build_direct_mode(enabled: bool) -> bytes:
     """
     payload = bytes([FEATURE_DIRECT_MODE, PARAM_DIRECT_MODE, 1 if enabled else 0])
     return build_frame(CMD_DIRECT_MODE, payload)
+
+
+def build_set_float(param: int, value: float) -> bytes:
+    """Construit une commande SET FLOAT (type 0x12) - mode sonore / égaliseur.
+
+    >>> build_set_float(PARAM_EQ_ENABLED, 1.0).hex()
+    '5a12070196090000803f'
+    >>> build_set_float(0x0b, -4.0).hex()
+    '5a120701960b000080c0'
+    """
+    payload = (
+        bytes([SET_FLOAT_PREFIX, TLV_FLOAT, param]) + struct.pack("<f", value)
+    )
+    return build_frame(CMD_SET_FLOAT, payload)
 
 
 def build_direct_mode_status() -> bytes:

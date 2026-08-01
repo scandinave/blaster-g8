@@ -40,6 +40,11 @@ Envoyer une trame arbitraire (type + payload en hexadécimal) ::
 Balayer les valeurs d'un paramètre pour identifier une fonction ::
 
     python tools/g8_probe.py --set 07:0002=1
+
+Lister puis appliquer un mode sonore (égaliseur + acoustic engine) ::
+
+    python tools/g8_probe.py --list-sound-modes
+    python tools/g8_probe.py --sound-mode esport --debug
 """
 
 from __future__ import annotations
@@ -57,6 +62,7 @@ from soundblaster_g8.driver import (  # noqa: E402
     SoundBlasterG8Driver,
     SoundBlasterG8Error,
 )
+from soundblaster_g8.sound_modes import SOUND_MODES  # noqa: E402
 
 
 def _truthy(value: str) -> bool:
@@ -179,6 +185,29 @@ def cmd_reconnect_test(driver: SoundBlasterG8Driver, count: int) -> int:
     return 0 if failures == 0 else 1
 
 
+def cmd_list_sound_modes() -> int:
+    """Affiche les modes sonores disponibles (générés depuis les captures)."""
+    print(f"{len(SOUND_MODES)} mode(s) sonore(s) disponible(s) :\n")
+    for slug, mode in SOUND_MODES.items():
+        print(f"  {slug:<28} {mode.label}")
+    return 0
+
+
+def cmd_sound_mode(driver: SoundBlasterG8Driver, slug: str) -> int:
+    mode = SOUND_MODES.get(slug)
+    if mode is None:
+        print(f"Mode sonore inconnu : {slug!r}")
+        print("Utilisez --list-sound-modes pour voir les slugs disponibles.")
+        return 2
+
+    print(f"Application du mode « {mode.label} » ({len(mode.writes)} paramètre(s))...")
+    ok = driver.set_sound_mode(list(mode.writes))
+    print()
+    print(f"Résultat : {'SUCCÈS' if ok else 'ÉCHEC'}")
+    print(f"Bandes EQ appliquées : {mode.bands}")
+    return 0 if ok else 1
+
+
 def cmd_set(driver: SoundBlasterG8Driver, spec: str) -> int:
     """``--set feature:param=value`` (valeurs en hexa ou décimal)."""
     try:
@@ -255,6 +284,16 @@ def cmd_selftest() -> int:
     ok &= _check("Direct status (req)",
                  protocol.build_direct_mode_status().hex(), "5a39050120000000")
     ok &= _check("Sonde info", protocol.build_info_probe().hex(), "5a090102")
+    ok &= _check(
+        "SET_FLOAT (EQ on)",
+        protocol.build_set_float(protocol.PARAM_EQ_ENABLED, 1.0).hex(),
+        "5a12070196090000803f",
+    )
+    ok &= _check(
+        "Modes sonores générés",
+        len(SOUND_MODES) > 0,
+        True,
+    )
 
     # Trame Direct Mode OFF telle qu'elle part sur le fil : 64 octets paddés,
     # précédés du report ID 0x00 (wValue=0x0200, wLength=64).
@@ -320,6 +359,10 @@ def main() -> int:
     parser.add_argument("--reconnect-test", type=int, metavar="N",
                         help="enchaîner N bascules du Direct Mode")
     parser.add_argument("--set", metavar="F:P=V", help="écrire un paramètre (ex. 07:0002=1)")
+    parser.add_argument("--list-sound-modes", action="store_true",
+                        help="lister les modes sonores disponibles")
+    parser.add_argument("--sound-mode", metavar="SLUG",
+                        help="appliquer un mode sonore (voir --list-sound-modes)")
     parser.add_argument("--raw", nargs=2, metavar=("TYPE", "PAYLOAD"),
                         help="envoyer une trame arbitraire (hexa)")
     parser.add_argument("--monitor", action="store_true",
@@ -338,10 +381,13 @@ def main() -> int:
         return cmd_backend()
     if args.list:
         return cmd_list()
+    if args.list_sound_modes:
+        return cmd_list_sound_modes()
 
     needs_hardware = (
         args.scout or args.direct or args.direct_status
         or args.reconnect_test or args.set or args.raw or args.monitor
+        or args.sound_mode
     )
     if not needs_hardware:
         parser.print_help()
@@ -369,6 +415,8 @@ def main() -> int:
             return cmd_raw(driver, args.raw[0], args.raw[1])
         if args.monitor:
             return cmd_monitor(driver, args.duration)
+        if args.sound_mode:
+            return cmd_sound_mode(driver, args.sound_mode)
     finally:
         driver.disconnect()
 

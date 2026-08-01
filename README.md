@@ -9,8 +9,9 @@ sous **macOS** et **Linux** (Windows possible via hidapi, non testé).
 |---|---|---|
 | **Scout Mode** | ✅ Fonctionnel | Trame validée sur le matériel, trafic USB identique à l'application Creative |
 | **Direct Mode** | ✅ Fonctionnel | Trame `0x39` validée, lecture d'état + reconnexion après le reset USB de la carte |
+| **Mode Sonore** | ✅ Fonctionnel | 51 modes (jeux, musique, égaliseurs génériques) reversés depuis des captures dédiées, trame `0x12` par paramètre |
 | CrystalVoice | ⛔ Non implémenté | Trame USB non encore capturée |
-| Égaliseur 10 bandes | ⛔ Non implémenté | Interface présente, mais aucune commande envoyée à la carte |
+| Égaliseur 10 bandes (édition manuelle par slider) | ⛔ Non implémenté | La lecture/écriture d'une bande isolée n'est pas câblée ; seule l'application d'un mode sonore complet (ci-dessus) l'est |
 
 Les fonctions non implémentées sont grisées dans l'interface : elles ne
 prétendent pas agir sur la carte tant que la trame correspondante n'a pas été
@@ -102,6 +103,8 @@ python tools/g8_probe.py --reconnect-test 5  # 5 bascules consécutives du Direc
 python tools/g8_probe.py --monitor           # écoute les notifications de la carte
 python tools/g8_probe.py --raw 26 0702000100 # envoie une trame arbitraire
 python tools/g8_probe.py --set 07:0002=1     # écrit un paramètre (feature:param=valeur)
+python tools/g8_probe.py --list-sound-modes  # liste les modes sonores disponibles
+python tools/g8_probe.py --sound-mode esport --debug  # applique un mode sonore
 ```
 
 ## Protocole USB (reversé)
@@ -228,17 +231,46 @@ Dump de paramètres (type 0x11) :
       96 00 00 00 80 3f  ->  param 0x00 = 1.0
 ```
 
+### Mode Sonore (type `0x12`, confirmé)
+
+Chaque mode sonore de l'application Creative (un fichier
+`Equalizer-*.pcapng` par mode dans les captures dédiées) envoie une séquence
+ordonnée d'écritures **`CMD_SET_FLOAT`** :
+
+```
+payload (7 octets) = 0x01 0x96 <param_id:1> <valeur:f32 LE>
+
+écriture bande 0x0b = -4.0 dB : 5a 12 07 01 96 0b 00 00 80 c0
+ACK                           : 5a 02 0a 12 00 ...
+```
+
+`0x96` est le même marqueur TLV que celui des entrées d'un dump `0x11`
+(`0x01` est un préfixe constant, rôle non identifié). Paramètres confirmés :
+
+- param `0x00` : SBX master (0/1)
+- param `0x01` : gain/compensation master
+- param `0x09` : égaliseur on/off
+- params `0x0b`–`0x14` : les 10 bandes de l'égaliseur, en dB
+- param `0x0a` : preset d'égaliseur (0 = manuel, constant observé)
+
+D'autres paramètres apparaissent selon les modes (`0x02`, `0x04`/`0x05`,
+`0x07`/`0x08`, `0x18`/`0x19`...), probablement des sous-réglages de
+l'« acoustic engine » (Crystalizer, Bass, Surround...) : leur rôle exact
+n'est pas identifié, mais rejouer la séquence complète capturée suffit à
+appliquer le mode correctement. Aucun reset USB n'est déclenché par ces
+écritures.
+
+Les séquences par mode sont générées depuis les captures par
+`tools/extract_sound_modes.py` dans `soundblaster_g8/sound_modes.py` (voir
+« Contribuer au reverse engineering » ci-dessous pour ajouter un mode).
+
 ### À implémenter (pistes issues des captures)
 
-- `cmd 0x12` : écriture d'un **float32** (`protocol.CMD_SET_FLOAT`, documenté
-  mais non utilisé).
-- param `0x09` : égaliseur on/off.
-- params `0x0b`–`0x14` : les 10 bandes de l'égaliseur, en dB.
-- param `0x0a` : preset d'égaliseur.
-- param `0x00` : master SBX.
-
-Ces valeurs apparaissent dans les dumps `0x11` ; l'écriture reste à valider sur
-le matériel (deuxième passe, hors périmètre actuel).
+- Édition manuelle d'une bande EQ isolée depuis l'interface (slider) : le
+  mécanisme (`CMD_SET_FLOAT`) est connu, seule l'écriture bande-par-bande
+  n'est pas câblée dans `driver.eq_set_band`.
+- Rôle exact des paramètres secondaires listés ci-dessus (`0x02`, `0x04`,
+  `0x05`, `0x07`, `0x08`, `0x18`, `0x19`...).
 
 ## Contribuer au reverse engineering
 
@@ -273,16 +305,27 @@ Pour ajouter une fonction (Direct Mode, CrystalVoice, EQ...) :
 `python tools/g8_probe.py --monitor` affiche en direct les notifications
 décodées, ce qui aide à repérer les identifiants de paramètres.
 
+Pour ajouter un mode sonore (nouveau preset EQ/acoustic engine) : capturer le
+trafic pendant que l'application Creative applique **un seul** mode (même
+procédure ci-dessus), déposer le `.pcapng` dans le dossier de captures, puis
+régénérer `soundblaster_g8/sound_modes.py` :
+
+```bash
+python tools/extract_sound_modes.py --input /chemin/vers/le/dossier/de/captures
+```
+
 ## Structure du projet
 
 ```
 OpenCreativeApp/
 ├── main.py                      # point d'entrée GUI
 ├── tools/g8_probe.py            # CLI de diagnostic / reverse engineering
+├── tools/extract_sound_modes.py # génère sound_modes.py depuis des captures pcap
 ├── udev/99-soundblaster-g8.rules
 └── soundblaster_g8/
     ├── hidbackend.py            # sélection du backend hidapi (seul code par plateforme)
     ├── protocol.py              # encodage/décodage des trames (sans I/O)
+    ├── sound_modes.py           # modes sonores générés (voir extract_sound_modes.py)
     ├── driver.py                # I/O HID (hidapi)
     ├── controller.py            # logique métier + événements
     └── gui/
