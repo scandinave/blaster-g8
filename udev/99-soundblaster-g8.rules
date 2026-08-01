@@ -4,15 +4,31 @@
 #   sudo cp udev/99-soundblaster-g8.rules /etc/udev/rules.d/
 #   sudo udevadm control --reload-rules && sudo udevadm trigger
 #
-# Sous Linux, hidapi communique avec la carte via /dev/hidrawX : c'est donc
-# ce noeud (et non seulement le device USB) qui doit être accessible.
-# TAG+="uaccess" délègue les droits à l'utilisateur de la session locale,
-# ce qui est plus sûr qu'un MODE="0666" global.
+# Les deux règles ci-dessous couvrent les deux backends hidapi utilisables :
+#   * hidraw  -> accès direct à /dev/hidrawX  (1re règle)
+#   * libusb  -> accès au device USB parent   (2e règle)
+# Voir soundblaster_g8/hidbackend.py pour la sélection du backend.
+#
+# Notes sur les droits :
+#   * TAG+="uaccess" suffit pour un usage normal : systemd-logind donne alors
+#     l'accès à l'utilisateur de la *session locale* courante, sans groupe ni
+#     MODE="0666" global. C'est le mécanisme à privilégier.
+#   * GROUP="plugdev" est simplement **ignoré** sur les distributions qui n'ont
+#     pas ce groupe (Fedora, Arch, openSUSE...) : udev journalise un
+#     avertissement « unknown group » et la règle continue de s'appliquer. On
+#     le garde pour Debian/Ubuntu, où il permet aussi les sessions distantes.
+#   * MODE="0660" sans uaccess ni groupe correspondant = accès root seulement.
 
-# Interface HID de contrôle (usage page 0xFF01) et interface Consumer
+# 1) Noeuds hidraw : interface HID de contrôle (usage page 0xFF01) et
+#    interface Consumer. C'est ce que le backend hidraw ouvre.
 KERNEL=="hidraw*", ATTRS{idVendor}=="041e", ATTRS{idProduct}=="329b", \
     MODE="0660", GROUP="plugdev", TAG+="uaccess"
 
-# Device USB parent (utile pour les accès libusb / diagnostics lsusb -v)
+# 2) Device USB parent. **Obligatoire pour le backend libusb** : celui-ci
+#    n'utilise pas /dev/hidrawX mais ouvre le device via usbfs
+#    (/dev/bus/usb/BBB/DDD) et doit détacher le driver noyau usbhid de
+#    l'interface 4 avant de pouvoir émettre le SET_REPORT. Sans cette règle,
+#    l'ouverture échoue avec LIBUSB_ERROR_ACCESS.
+#    Utile aussi pour les diagnostics 'lsusb -v' sans sudo.
 SUBSYSTEM=="usb", ATTR{idVendor}=="041e", ATTR{idProduct}=="329b", \
     MODE="0660", GROUP="plugdev", TAG+="uaccess"

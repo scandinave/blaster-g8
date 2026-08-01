@@ -1,2 +1,0 @@
-[console_scripts]
-soundblaster-g8 = main:main

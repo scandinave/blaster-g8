@@ -12,7 +12,7 @@ from typing import Callable, Optional
 from .driver import SoundBlasterG8Driver, get_driver
 
 #: Fonctions dont la trame USB a été identifiée et validée sur le matériel.
-SUPPORTED_FEATURES = frozenset({"scout_mode"})
+SUPPORTED_FEATURES = frozenset({"scout_mode", "direct_mode"})
 
 
 class SoundBlasterController:
@@ -45,7 +45,13 @@ class SoundBlasterController:
             "eq_band_changed": [],
             "eq_all_bands_changed": [],
             "command_failed": [],
+            # (bool) : True quand la carte se réénumère (bascule du Direct
+            # Mode), False quand la reconnexion est terminée.
+            "reconnecting": [],
         }
+
+        # Le driver signale les reconnexions : on les relaie tel quel.
+        self._driver.on_reconnecting = lambda active: self._notify("reconnecting", active)
 
     # ------------------------------------------------------------------
     # Connectivité
@@ -133,20 +139,52 @@ class SoundBlasterController:
         return self._scout_mode
 
     # ------------------------------------------------------------------
-    # Fonctions non encore reversées
+    # Direct Mode (supporté)
     # ------------------------------------------------------------------
 
     def set_direct_mode(self, enabled: bool) -> bool:
+        """Active/désactive le Direct Mode.
+
+        La bascule provoque un reset USB de la carte : l'appel peut durer
+        plusieurs secondes (l'événement ``reconnecting`` encadre l'attente) et
+        ne doit donc pas être fait depuis le thread de l'interface graphique.
+
+        Returns:
+            ``True`` si la carte a acquitté la commande **et** a été rouverte.
+        """
         ok = bool(self._driver.set_direct_mode(enabled))
-        if ok:
-            self._direct_mode = enabled
-            self._notify("direct_mode_changed", enabled)
-        else:
+        if not ok:
             self._notify("command_failed", "direct_mode", enabled)
-        return ok
+            return False
+
+        self._direct_mode = enabled
+        # Le reset USB peut avoir remis d'autres réglages à leur valeur par
+        # défaut : on relit l'état matériel et on re-notifie.
+        self._resync_after_toggle()
+        return True
+
+    def _resync_after_toggle(self) -> None:
+        """Relit l'état matériel après un reset USB et re-notifie la GUI."""
+        direct = self._driver.get_direct_mode()
+        if direct is not None:
+            self._direct_mode = bool(direct)
+        self._notify("direct_mode_changed", self._direct_mode)
+
+        scout = self._driver.get_scout_mode()
+        if scout is not None:
+            self._scout_mode = bool(scout)
+        self._notify("scout_mode_changed", self._scout_mode)
 
     def get_direct_mode(self) -> bool:
+        """Interroge la carte (et non le cache local) sur l'état du Direct Mode."""
+        state = self._driver.get_direct_mode()
+        if state is not None:
+            self._direct_mode = bool(state)
         return self._direct_mode
+
+    # ------------------------------------------------------------------
+    # Fonctions non encore reversées
+    # ------------------------------------------------------------------
 
     def set_crystalvoice(self, enabled: bool) -> bool:
         ok = bool(self._driver.set_crystalvoice(enabled))

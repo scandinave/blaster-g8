@@ -1,11 +1,17 @@
 """
 MainWindow pour l'application de contrôle Sound Blaster G8.
 Interface Tkinter avec les contrôles principaux.
+
+Les commandes matérielles sont exécutées dans un thread de travail : une
+bascule du Direct Mode provoque un reset USB de la carte et prend 2 à 4
+secondes, ce qui gèlerait la fenêtre si elle était faite dans le callback Tk.
+Le résultat est rapatrié dans le thread graphique via ``self.after(0, ...)``.
 """
 
+import threading
 import tkinter as tk
 from tkinter import ttk
-from typing import Optional
+from typing import Callable, Optional
 
 from ..controller import SoundBlasterController
 
@@ -28,6 +34,11 @@ class MainWindow(tk.Tk):
         self._direct_mode_var = tk.BooleanVar(value=False)
         self._scout_mode_var = tk.BooleanVar(value=False)
         self._crystalvoice_var = tk.BooleanVar(value=False)
+
+        # Interrupteurs indisponibles (fonction non reversée) : ils ne doivent
+        # pas être réactivés à la fin d'une commande.
+        self._unavailable: set[str] = set()
+        self._switches: dict[str, tk.Checkbutton] = {}
 
         # Configuration de la fenêtre
         self._setup_ui()
@@ -141,6 +152,13 @@ class MainWindow(tk.Tk):
         """Initialise le contrôleur et se connecte au matériel."""
         from ..controller import get_controller
         self._controller = get_controller()
+        self._switches = {
+            "direct_mode": self._direct_toggle_switch,
+            "scout_mode": self._scout_toggle_switch,
+            "crystalvoice": self._crystalvoice_toggle_switch,
+        }
+        self._controller.add_listener("reconnecting", self._on_reconnecting)
+
         if self._controller.connect():
             info = self._controller.get_debug_info()
             self._status_label.config(
@@ -166,6 +184,7 @@ class MainWindow(tk.Tk):
              self._crystalvoice_toggle_label),
         ):
             if not self._controller.is_feature_supported(feature):
+                self._unavailable.add(feature)
                 switch.config(state=tk.DISABLED)
                 label.config(text=f"{label.cget('text')}\n(non implémenté)")
 
@@ -182,19 +201,87 @@ class MainWindow(tk.Tk):
         self._scout_mode_var.set(self._controller.get_scout_mode())
         self._crystalvoice_var.set(self._controller.get_crystalvoice())
 
-    def _handle_toggle(self, name: str, label: str, var: tk.BooleanVar, setter):
-        """Applique un toggle et annule l'affichage si la carte refuse."""
+    # ------------------------------------------------------------------
+    # Bascules (exécutées hors du thread graphique)
+    # ------------------------------------------------------------------
+
+    def _on_reconnecting(self, active: bool) -> None:
+        """Relais de l'événement ``reconnecting`` du contrôleur (worker thread)."""
+        text = (
+            "Direct Mode : reconnexion de la carte…"
+            if active
+            else "Carte reconnectée"
+        )
+        self.after(0, lambda: self._status_label.config(text=text))
+
+    def _handle_toggle(
+        self,
+        name: str,
+        label: str,
+        var: tk.BooleanVar,
+        setter: Callable[[bool], bool],
+        getter: Optional[Callable[[], bool]] = None,
+    ):
+        """Applique un toggle dans un thread, puis resynchronise l'affichage.
+
+        Le setter peut bloquer plusieurs secondes (reset USB du Direct Mode) :
+        l'interrupteur est désactivé pendant l'opération et le résultat est
+        appliqué dans le thread Tk.
+        """
         if not self._controller:
             return
 
         requested = var.get()
-        if setter(requested):
-            state = "activé" if requested else "désactivé"
-            self._status_label.config(text=f"{label} {state}")
+        switch = self._switches.get(name)
+        if switch is not None:
+            switch.config(state=tk.DISABLED)
+        self._status_label.config(text=f"{label} : envoi de la commande…")
+
+        def worker():
+            error: Optional[Exception] = None
+            ok = False
+            state: Optional[bool] = None
+            try:
+                ok = bool(setter(requested))
+                if getter is not None:
+                    # Relire l'état matériel réel : après un reset USB, la
+                    # carte est seule source de vérité.
+                    state = getter()
+            except Exception as exc:  # pragma: no cover - dépend du matériel
+                error = exc
+            self.after(0, lambda: self._finish_toggle(
+                name, label, var, requested, ok, state, error
+            ))
+
+        threading.Thread(target=worker, name=f"g8-{name}", daemon=True).start()
+
+    def _finish_toggle(
+        self,
+        name: str,
+        label: str,
+        var: tk.BooleanVar,
+        requested: bool,
+        ok: bool,
+        state: Optional[bool],
+        error: Optional[Exception],
+    ):
+        """Fin d'une bascule : réactive l'interrupteur et affiche l'état réel."""
+        switch = self._switches.get(name)
+        if switch is not None and name not in self._unavailable:
+            switch.config(state=tk.NORMAL)
+
+        # État affiché : celui du matériel s'il a pu être relu, sinon celui
+        # demandé (succès) ou l'ancien (échec).
+        effective = state if state is not None else (requested if ok else not requested)
+        var.set(effective)
+
+        if error is not None:
+            self._status_label.config(text=f"{label} : erreur ({error})")
+        elif ok:
+            self._status_label.config(
+                text=f"{label} {'activé' if effective else 'désactivé'}"
+            )
         else:
-            # La carte n'a pas confirmé : on remet l'interrupteur dans son
-            # état précédent pour ne pas afficher un état mensonger.
-            var.set(not requested)
             self._status_label.config(
                 text=f"{label} : échec de la commande (voir la console)"
             )
@@ -204,6 +291,7 @@ class MainWindow(tk.Tk):
         self._handle_toggle(
             "direct_mode", "Direct Mode", self._direct_mode_var,
             lambda v: self._controller.set_direct_mode(v),
+            getter=lambda: self._controller.get_direct_mode(),
         )
 
     def _on_scout_mode_change(self):
@@ -211,6 +299,7 @@ class MainWindow(tk.Tk):
         self._handle_toggle(
             "scout_mode", "Scout Mode", self._scout_mode_var,
             lambda v: self._controller.set_scout_mode(v),
+            getter=lambda: self._controller.get_scout_mode(),
         )
 
     def _on_crystalvoice_change(self):
