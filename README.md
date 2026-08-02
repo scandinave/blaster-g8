@@ -91,6 +91,24 @@ sudo usermod -aG plugdev "$USER"
 # puis se déconnecter/reconnecter (ou : newgrp plugdev / sg plugdev -c ...)
 ```
 
+#### Microphone désactivé au démarrage (source de capture ALSA)
+
+Le pilote noyau `snd-usb-audio` initialise le contrôle ALSA « PCM Capture
+Source » sur `Line In` au lieu de `External Mic` : le micro ne capte donc rien
+tant qu'on n'a pas changé la source manuellement, à chaque redémarrage de la
+carte.
+
+L'application réapplique ce correctif à chaque démarrage
+(`soundblaster_g8/alsa_fix.py`). Pour que le micro fonctionne même sans lancer
+l'app (ex. juste après avoir branché la carte), installez en plus le correctif
+système :
+
+```bash
+sudo alsa-fix/install.sh
+```
+
+Voir `alsa-fix/README.md` pour le détail (règle udev + script, désinstallation).
+
 ### macOS
 
 Aucune configuration particulière : l'accès HID aux interfaces vendor est

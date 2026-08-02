@@ -1,0 +1,6 @@
+# Sound Blaster G8 - Fix ALSA defaults on card detection
+# Matches on the sound subsystem (not raw USB), so the ALSA card is already registered.
+# ATTRS walks up to the USB parent to match vendor/product ID.
+SUBSYSTEM=="sound", ACTION=="add", DEVPATH=="*/controlC*", \
+  ATTRS{idVendor}=="041e", ATTRS{idProduct}=="329b", \
+  RUN+="/bin/sh -c '/usr/local/bin/soundblaster-g8-alsa-fix.sh &'"

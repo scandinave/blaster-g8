@@ -9,8 +9,8 @@ carte n'a pas répondu.
 
 from typing import Callable, Optional
 
-from . import protocol
-from .driver import SoundBlasterG8Driver, get_driver
+from . import alsa_fix, protocol
+from .driver import PRODUCT_ID, VENDOR_ID, SoundBlasterG8Driver, get_driver
 from .sound_modes import DEFAULT_SOUND_MODE, SOUND_MODES
 
 #: Fonctions dont la trame USB a été identifiée et validée sur le matériel.
@@ -85,7 +85,13 @@ class SoundBlasterController:
     # ------------------------------------------------------------------
 
     def connect(self) -> bool:
-        """Établit la connexion au matériel puis charge l'état connu."""
+        """Établit la connexion au matériel puis charge l'état connu.
+
+        Réapplique aussi le correctif ALSA (source de capture micro, voir
+        :mod:`soundblaster_g8.alsa_fix`) : ce bug est indépendant du canal de
+        contrôle HID, donc traité même si la connexion HID échoue.
+        """
+        alsa_fix.ensure_microphone_source(VENDOR_ID, PRODUCT_ID)
         connected = self._driver.connect()
         if connected:
             self._load_current_state()
