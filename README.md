@@ -76,6 +76,21 @@ Mode, le nouveau `/dev/hidrawN` peut apparaître avant que udev n'ait appliqué
 les droits. Le driver retente donc l'ouverture (`PermissionError` traitée comme
 transitoire) pendant 12 secondes.
 
+⚠️ **`uaccess` pas toujours fiable au hotplug** : sur certaines sessions
+(observé sous COSMIC/Wayland), l'ACL `uaccess` n'est posée par
+`systemd-logind` que pour les devices déjà présents à l'ouverture de session —
+pas pour ceux qui apparaissent ensuite (reset USB, replug). Dans ce cas, les
+12 secondes de retry ci-dessus ne suffisent jamais : *chaque* lecture d'état
+timeout (y compris au tout premier démarrage de l'app), et la reconnexion
+après une bascule du Direct Mode échoue systématiquement. Si vous observez ce
+symptôme, ajoutez-vous explicitement au groupe `plugdev` (indépendant de
+`uaccess`, appliqué de façon synchrone par la règle udev) :
+
+```bash
+sudo usermod -aG plugdev "$USER"
+# puis se déconnecter/reconnecter (ou : newgrp plugdev / sg plugdev -c ...)
+```
+
 ### macOS
 
 Aucune configuration particulière : l'accès HID aux interfaces vendor est
