@@ -39,6 +39,9 @@ class EQPanel(tk.Frame):
         "1 kHz", "2 kHz", "4 kHz", "8 kHz", "16 kHz"
     ]
 
+    #: Hauteur de piste des sliders verticaux (Bandes/Préampli/Tonalité).
+    SLIDER_HEIGHT = 180
+
     def __init__(
         self,
         parent,
@@ -74,39 +77,53 @@ class EQPanel(tk.Frame):
         self._setup_ui()
 
     def _setup_ui(self):
-        """Configure l'interface de l'égaliseur."""
+        """Configure l'interface de l'égaliseur.
+
+        Sliders verticaux côte à côte dans une seule rangée, dans l'ordre
+        Bandes -> Préampli -> Tonalité (chaque groupe garde son libellé, un
+        séparateur fin les distingue visuellement sans revenir à des cartes
+        empilées séparées).
+        """
         self._sliders: list[widgets.Slider] = []
         self._labels: list[tk.Label] = []
 
         container = tk.Frame(self, bg=theme.BG_WINDOW)
         container.pack(fill=tk.BOTH, expand=True, padx=36, pady=(16, 0))
 
-        # Préampli - même mécanique qu'une bande (paramètre dédié, exact)
-        preamp_card = self._build_card(container, "Préampli")
-        self._preamp_slider, self._preamp_label = self._add_slider_row(
-            preamp_card, "Gain", self._preamp_var, self._commit_preamp,
-        )
+        sliders_card = self._build_card(container, "Égaliseur")
+        row = tk.Frame(sliders_card, bg=theme.BG_CARD)
+        row.pack(anchor="w")
 
-        # Basse / Aigus - approximation (voir docstring du module)
-        tilt_card = self._build_card(container, "Tonalité (approximatif)")
-        self._bass_slider, self._bass_label = self._add_slider_row(
-            tilt_card, "Basse", self._bass_var,
-            lambda: self._commit_tilt("Basse", self._bass_var, self.controller.set_eq_bass),
-        )
-        self._treble_slider, self._treble_label = self._add_slider_row(
-            tilt_card, "Aigus", self._treble_var,
-            lambda: self._commit_tilt("Aigus", self._treble_var, self.controller.set_eq_treble),
-        )
-
-        # Cadre des sliders EQ (10 bandes)
-        bands_card = self._build_card(container, "Bandes")
+        # Bandes (10 colonnes)
+        bands_group = self._build_group(row, "Bandes")
         for i in range(len(self._band_vars)):
-            slider, label = self._add_slider_row(
-                bands_card, self.FREQUENCY_BANDS[i], self._band_vars[i],
+            slider, label = self._add_slider_column(
+                bands_group, self.FREQUENCY_BANDS[i], self._band_vars[i],
                 lambda idx=i: self._commit_band(idx),
             )
             self._sliders.append(slider)
             self._labels.append(label)
+
+        self._add_group_separator(row)
+
+        # Préampli - même mécanique qu'une bande (paramètre dédié, exact)
+        preamp_group = self._build_group(row, "Préampli")
+        self._preamp_slider, self._preamp_label = self._add_slider_column(
+            preamp_group, "Gain", self._preamp_var, self._commit_preamp,
+        )
+
+        self._add_group_separator(row)
+
+        # Basse / Aigus - approximation (voir docstring du module)
+        tilt_group = self._build_group(row, "Tonalité (approximatif)")
+        self._bass_slider, self._bass_label = self._add_slider_column(
+            tilt_group, "Basse", self._bass_var,
+            lambda: self._commit_tilt("Basse", self._bass_var, self.controller.set_eq_bass),
+        )
+        self._treble_slider, self._treble_label = self._add_slider_column(
+            tilt_group, "Aigus", self._treble_var,
+            lambda: self._commit_tilt("Aigus", self._treble_var, self.controller.set_eq_treble),
+        )
 
         # Cadre des presets
         presets_card = self._build_card(container, "Presets Rapides")
@@ -159,44 +176,68 @@ class EQPanel(tk.Frame):
         inner.pack(fill=tk.BOTH, expand=True, padx=20, pady=18)
         return inner
 
-    def _add_slider_row(
+    def _build_group(self, parent, title: str) -> tk.Frame:
+        """Sous-groupe de colonnes (titre + rangée de sliders verticaux).
+
+        Empilé côte à côte avec les autres groupes (``pack(side=tk.LEFT)``)
+        dans la même rangée : garde un regroupement visuel/label sans revenir
+        à des cartes séparées empilées verticalement.
+        """
+        group = tk.Frame(parent, bg=theme.BG_CARD)
+        group.pack(side=tk.LEFT, anchor="n")
+
+        tk.Label(
+            group, text=title, bg=theme.BG_CARD, fg=theme.FG_LABEL,
+            font=theme.FONT_LABEL, anchor="w",
+        ).pack(fill=tk.X, pady=(0, 12))
+
+        columns = tk.Frame(group, bg=theme.BG_CARD)
+        columns.pack()
+        return columns
+
+    def _add_group_separator(self, parent) -> None:
+        """Séparateur fin entre deux groupes de colonnes."""
+        tk.Frame(parent, bg=theme.BORDER_CARD, width=1).pack(
+            side=tk.LEFT, fill=tk.Y, padx=16, pady=4,
+        )
+
+    def _add_slider_column(
         self,
         parent,
         label_text: str,
         var: tk.DoubleVar,
         on_release: Callable[[], None],
     ) -> tuple[widgets.Slider, tk.Label]:
-        """Construit une ligne slider horizontal + label fréquence/valeur.
+        """Construit une colonne slider vertical (valeur, curseur, libellé).
 
         Le curseur suit le glissement (affichage local) ; l'envoi matériel
         se fait au relâchement (``on_release``) pour ne pas saturer le canal
         de contrôle HID.
         """
-        row = tk.Frame(parent, bg=theme.BG_CARD)
-        row.pack(fill=tk.X, pady=8)
-
-        name_label = tk.Label(
-            row, text=label_text, width=9, anchor="w",
-            bg=theme.BG_CARD, fg=theme.FG_PRIMARY, font=theme.FONT_BODY,
-        )
-        name_label.pack(side=tk.LEFT)
+        column = tk.Frame(parent, bg=theme.BG_CARD)
+        column.pack(side=tk.LEFT, padx=8)
 
         value_label = tk.Label(
-            row, text=f"{var.get():+.1f} dB", width=7, anchor="center",
+            column, text=f"{var.get():+.1f} dB", anchor="center",
             bg=theme.BG_VALUE, fg=theme.FG_PRIMARY, font=theme.FONT_SMALL,
-            padx=6, pady=6,
+            padx=4, pady=4,
         )
-        value_label.pack(side=tk.RIGHT)
+        value_label.pack(pady=(0, 10))
 
         def on_drag(value: float, _label=value_label):
             _label.config(text=f"{value:+.1f} dB")
 
         slider = widgets.Slider(
-            row, variable=var, from_=-12, to=12, step=0.5,
+            column, variable=var, from_=-12, to=12, step=0.5,
             on_change=on_drag, on_release=on_release, bg=theme.BG_CARD,
-            width=240,
+            height=self.SLIDER_HEIGHT, orientation="vertical",
         )
-        slider.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=12)
+        slider.pack()
+
+        tk.Label(
+            column, text=label_text, anchor="center",
+            bg=theme.BG_CARD, fg=theme.FG_PRIMARY, font=theme.FONT_BODY,
+        ).pack(pady=(10, 0))
 
         return slider, value_label
 

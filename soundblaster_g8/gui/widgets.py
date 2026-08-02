@@ -176,15 +176,19 @@ class ToggleSwitch(tk.Canvas):
 
 
 class Slider(tk.Canvas):
-    """Slider horizontal façon mockup : piste fine + curseur rond.
+    """Slider façon mockup : piste fine + curseur rond, horizontal ou vertical.
 
     Le curseur suit la souris pendant le glissement (callback ``on_change``,
     utilisé pour l'affichage local) et n'appelle ``on_release`` qu'au
     relâchement, comme l'ancien ``ttk.Scale`` + ``<ButtonRelease-1>`` : c'est
     le point où la valeur est envoyée au matériel.
+
+    En orientation verticale, le curseur se déplace le long de l'axe Y : le
+    haut de la piste correspond à ``to`` (valeur max), comme un fader
+    physique - l'axe Tk (Y croissant vers le bas) est donc inversé.
     """
 
-    HEIGHT = 22
+    THICKNESS = 22  # épaisseur de la piste (hauteur en horizontal, largeur en vertical)
     TRACK_H = 4
     THUMB_R = 9
 
@@ -199,15 +203,24 @@ class Slider(tk.Canvas):
         on_release: Optional[Callable[[], None]] = None,
         bg: str = theme.BG_CARD,
         width: int = 220,
+        height: int = 180,
+        orientation: str = "horizontal",
     ):
-        super().__init__(parent, height=self.HEIGHT, width=width, highlightthickness=0, bg=bg, bd=0)
+        self._orientation = orientation
+        self._vertical = orientation == "vertical"
+        # ``_length`` : dimension le long de l'axe de glissement (largeur en
+        # horizontal, hauteur en vertical) ; l'épaisseur perpendiculaire est
+        # toujours THICKNESS.
+        self._length = height if self._vertical else width
+        canvas_w = self.THICKNESS if self._vertical else width
+        canvas_h = height if self._vertical else self.THICKNESS
+        super().__init__(parent, width=canvas_w, height=canvas_h, highlightthickness=0, bg=bg, bd=0)
         self._variable = variable
         self._from = from_
         self._to = to
         self._step = step
         self._on_change = on_change
         self._on_release = on_release
-        self._width = width
 
         self.bind("<Configure>", self._on_configure)
         self.bind("<Button-1>", self._on_drag)
@@ -217,24 +230,28 @@ class Slider(tk.Canvas):
         self._redraw()
 
     def _on_configure(self, event: tk.Event) -> None:
-        self._width = event.width
+        self._length = event.height if self._vertical else event.width
         self._redraw()
 
-    def _value_to_x(self, value: float) -> float:
+    def _value_to_pos(self, value: float) -> float:
         span = self._to - self._from
         ratio = 0.0 if span == 0 else (value - self._from) / span
-        usable = max(self._width - 2 * self.THUMB_R, 1)
-        return self.THUMB_R + ratio * usable
+        usable = max(self._length - 2 * self.THUMB_R, 1)
+        pos = self.THUMB_R + ratio * usable
+        # Axe Y inversé : valeur haute = position en haut (Y plus petit).
+        return self._length - pos if self._vertical else pos
 
-    def _x_to_value(self, x: float) -> float:
-        usable = max(self._width - 2 * self.THUMB_R, 1)
-        ratio = min(1.0, max(0.0, (x - self.THUMB_R) / usable))
+    def _pos_to_value(self, pos: float) -> float:
+        if self._vertical:
+            pos = self._length - pos
+        usable = max(self._length - 2 * self.THUMB_R, 1)
+        ratio = min(1.0, max(0.0, (pos - self.THUMB_R) / usable))
         raw = self._from + ratio * (self._to - self._from)
         stepped = round(raw / self._step) * self._step
         return min(self._to, max(self._from, stepped))
 
     def _on_drag(self, event: tk.Event) -> None:
-        value = self._x_to_value(event.x)
+        value = self._pos_to_value(event.y if self._vertical else event.x)
         if value != self._variable.get():
             self._variable.set(value)
             if self._on_change is not None:
@@ -246,16 +263,27 @@ class Slider(tk.Canvas):
 
     def _redraw(self) -> None:
         self.delete("all")
-        cy = self.HEIGHT / 2
-        self.create_line(
-            self.THUMB_R, cy, max(self._width - self.THUMB_R, self.THUMB_R), cy,
-            fill=theme.SLIDER_TRACK, width=self.TRACK_H, capstyle=tk.ROUND,
-        )
-        x = self._value_to_x(self._variable.get())
-        self.create_oval(
-            x - self.THUMB_R, cy - self.THUMB_R, x + self.THUMB_R, cy + self.THUMB_R,
-            fill=theme.FG_THUMB, outline="#1a1a1c",
-        )
+        c = self.THICKNESS / 2
+        pos = self._value_to_pos(self._variable.get())
+        track_end = max(self._length - self.THUMB_R, self.THUMB_R)
+        if self._vertical:
+            self.create_line(
+                c, self.THUMB_R, c, track_end,
+                fill=theme.SLIDER_TRACK, width=self.TRACK_H, capstyle=tk.ROUND,
+            )
+            self.create_oval(
+                c - self.THUMB_R, pos - self.THUMB_R, c + self.THUMB_R, pos + self.THUMB_R,
+                fill=theme.FG_THUMB, outline="#1a1a1c",
+            )
+        else:
+            self.create_line(
+                self.THUMB_R, c, track_end, c,
+                fill=theme.SLIDER_TRACK, width=self.TRACK_H, capstyle=tk.ROUND,
+            )
+            self.create_oval(
+                pos - self.THUMB_R, c - self.THUMB_R, pos + self.THUMB_R, c + self.THUMB_R,
+                fill=theme.FG_THUMB, outline="#1a1a1c",
+            )
 
 
 class RoundedButton(tk.Canvas):
