@@ -1,11 +1,11 @@
-"""Widgets Canvas façon mockup : interrupteur à bascule, slider, boutons pilule,
-badges d'icônes et sélecteur « split button ».
+"""Mockup-style Canvas widgets: toggle switch, slider, pill buttons,
+icon badges, and a "split button" selector.
 
-Tkinter n'offre pas nativement de coins arrondis ni d'interrupteurs à
-bascule : ces classes dessinent les formes du design (« Sound Blaster
-G8.dc.html ») sur un ``tk.Canvas`` tout en gardant une API proche des widgets
-standard (``tk.BooleanVar``/``tk.DoubleVar``, callbacks ``command``) pour
-s'intégrer sans changer la logique métier des pages appelantes.
+Tkinter has no native support for rounded corners or toggle switches: these
+classes draw the design's shapes ("Sound Blaster G8.dc.html") on a
+``tk.Canvas`` while keeping an API close to standard widgets
+(``tk.BooleanVar``/``tk.DoubleVar``, ``command`` callbacks) so they drop in
+without changing the calling pages' business logic.
 """
 
 import tkinter as tk
@@ -43,10 +43,11 @@ def draw_rounded_rect(canvas: tk.Canvas, x1: float, y1: float, x2: float, y2: fl
 
 
 def draw_icon(canvas: tk.Canvas, name: str, x0: float, y0: float, x1: float, y1: float, color: str = ICON_COLOR) -> None:
-    """Dessine une icône simple (glyphe géométrique) dans la zone [x0,y0,x1,y1].
+    """Draws a simple icon (geometric glyph) within the [x0,y0,x1,y1] area.
 
-    Approximations Canvas des pictogrammes SVG du mockup (traits/formes de
-    base) : suffisant à l'échelle d'un badge 36x36, sans dépendance externe.
+    Canvas approximations of the mockup's SVG pictograms (basic
+    lines/shapes): good enough at 36x36 badge scale, with no external
+    dependency.
     """
     w = x1 - x0
     h = y1 - y0
@@ -90,7 +91,7 @@ def draw_icon(canvas: tk.Canvas, name: str, x0: float, y0: float, x1: float, y1:
 
 
 class IconBadge(tk.Canvas):
-    """Badge carré arrondi (fond sombre) contenant une petite icône centrée."""
+    """Rounded square badge (dark background) with a small centered icon."""
 
     SIZE = 36
 
@@ -116,7 +117,7 @@ class IconBadge(tk.Canvas):
 
 
 class ToggleSwitch(tk.Canvas):
-    """Interrupteur à bascule façon pilule (piste + pastille glissante)."""
+    """Pill-shaped toggle switch (track + sliding thumb)."""
 
     WIDTH = 38
     HEIGHT = 22
@@ -176,19 +177,19 @@ class ToggleSwitch(tk.Canvas):
 
 
 class Slider(tk.Canvas):
-    """Slider façon mockup : piste fine + curseur rond, horizontal ou vertical.
+    """Mockup-style slider: thin track + round thumb, horizontal or vertical.
 
-    Le curseur suit la souris pendant le glissement (callback ``on_change``,
-    utilisé pour l'affichage local) et n'appelle ``on_release`` qu'au
-    relâchement, comme l'ancien ``ttk.Scale`` + ``<ButtonRelease-1>`` : c'est
-    le point où la valeur est envoyée au matériel.
+    The thumb follows the mouse while dragging (``on_change`` callback, used
+    for local display) and only calls ``on_release`` on release, like the
+    old ``ttk.Scale`` + ``<ButtonRelease-1>``: that's the point where the
+    value is sent to the hardware.
 
-    En orientation verticale, le curseur se déplace le long de l'axe Y : le
-    haut de la piste correspond à ``to`` (valeur max), comme un fader
-    physique - l'axe Tk (Y croissant vers le bas) est donc inversé.
+    In vertical orientation, the thumb moves along the Y axis: the top of
+    the track corresponds to ``to`` (max value), like a physical fader - so
+    the Tk axis (Y increasing downward) is inverted.
     """
 
-    THICKNESS = 22  # épaisseur de la piste (hauteur en horizontal, largeur en vertical)
+    THICKNESS = 22  # track thickness (height when horizontal, width when vertical)
     TRACK_H = 4
     THUMB_R = 9
 
@@ -208,9 +209,9 @@ class Slider(tk.Canvas):
     ):
         self._orientation = orientation
         self._vertical = orientation == "vertical"
-        # ``_length`` : dimension le long de l'axe de glissement (largeur en
-        # horizontal, hauteur en vertical) ; l'épaisseur perpendiculaire est
-        # toujours THICKNESS.
+        # ``_length``: dimension along the drag axis (width when horizontal,
+        # height when vertical); the perpendicular thickness is always
+        # THICKNESS.
         self._length = height if self._vertical else width
         canvas_w = self.THICKNESS if self._vertical else width
         canvas_h = height if self._vertical else self.THICKNESS
@@ -238,7 +239,7 @@ class Slider(tk.Canvas):
         ratio = 0.0 if span == 0 else (value - self._from) / span
         usable = max(self._length - 2 * self.THUMB_R, 1)
         pos = self.THUMB_R + ratio * usable
-        # Axe Y inversé : valeur haute = position en haut (Y plus petit).
+        # Inverted Y axis: high value = top position (smaller Y).
         return self._length - pos if self._vertical else pos
 
     def _pos_to_value(self, pos: float) -> float:
@@ -287,7 +288,7 @@ class Slider(tk.Canvas):
 
 
 class RoundedButton(tk.Canvas):
-    """Bouton pilule à fond uni et coins arrondis, avec icône optionnelle."""
+    """Pill button with a solid fill and rounded corners, with optional icon."""
 
     def __init__(
         self,
@@ -367,12 +368,12 @@ class RoundedButton(tk.Canvas):
 
 
 class SplitSelect(tk.Canvas):
-    """Sélecteur façon mockup : champ texte + bouton chevron bleu accolé.
+    """Mockup-style selector: text field + attached blue chevron button.
 
-    Remplace le ``ttk.Combobox`` du Mode Sonore : même sémantique
-    (liste de libellés, sélection par index) mais rendu fidèle au design
-    (piste sombre + capuchon bleu arrondi à droite). Le menu déroulant
-    s'appuie sur ``tk.Menu`` (natif à la plateforme).
+    Replaces the Sound Mode's ``ttk.Combobox``: same semantics (list of
+    labels, selection by index) but rendered to match the design (dark
+    track + rounded blue cap on the right). The dropdown menu is built on
+    ``tk.Menu`` (native to the platform).
     """
 
     HEIGHT = 44
@@ -459,7 +460,7 @@ class SplitSelect(tk.Canvas):
 
         arrow_x0 = self._width - self.ARROW_W
         draw_rounded_rect(self, arrow_x0, 0, self._width, self.HEIGHT, radius, fill=accent, outline="")
-        # Le capuchon n'est arrondi qu'à droite : on aplatit son bord gauche.
+        # The cap is only rounded on the right: flatten its left edge.
         self.create_rectangle(arrow_x0, 0, arrow_x0 + radius, self.HEIGHT, fill=accent, outline="")
 
         label = self._values[self._index] if 0 <= self._index < len(self._values) else ""

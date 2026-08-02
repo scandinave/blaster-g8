@@ -3,3 +3,4 @@ build
 __pycache__
 soundblaster_g8.egg-info
 .venv
+soundblaster_g8/locale/*/LC_MESSAGES/*.mo

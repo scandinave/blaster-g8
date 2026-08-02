@@ -1,0 +1,176 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: soundblaster-g8\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: en\n"
+
+#. Language selector: this language's own name, in its own language.
+msgid "language.native_name"
+msgstr "English"
+
+#. Sound mode overlay: the 4 user-authored preset names among the ~51
+#. vendor-captured sound modes (the rest are game titles, already
+#. language-neutral). Keyed by slug, not extracted from sound_modes.py.
+msgid "sound_mode.disabled"
+msgstr "Disabled"
+
+msgid "sound_mode.jeux"
+msgstr "Gaming"
+
+msgid "sound_mode.musique"
+msgstr "Music"
+
+msgid "sound_mode.stade"
+msgstr "Stadium"
+
+msgid "Sound Blaster G8 - Control"
+msgstr "Sound Blaster G8 - Control"
+
+msgid "Ready"
+msgstr "Ready"
+
+msgid "←  Back"
+msgstr "←  Back"
+
+msgid "Sound Blaster G8"
+msgstr "Sound Blaster G8"
+
+msgid "Equalizer"
+msgstr "Equalizer"
+
+msgid "Direct Mode"
+msgstr "Direct Mode"
+
+msgid "No signal processing"
+msgstr "No signal processing"
+
+msgid "Scout Mode"
+msgstr "Scout Mode"
+
+msgid "In-game sound detection"
+msgstr "In-game sound detection"
+
+msgid "CrystalVoice"
+msgstr "CrystalVoice"
+
+msgid "In-game voice optimization"
+msgstr "In-game voice optimization"
+
+msgid "Sound Mode"
+msgstr "Sound Mode"
+
+msgid "Equalizer and acoustic engine"
+msgstr "Equalizer and acoustic engine"
+
+msgid "(not implemented)"
+msgstr "(not implemented)"
+
+msgid "Connected to Sound Blaster G8 (interface {interface})"
+msgstr "Connected to Sound Blaster G8 (interface {interface})"
+
+msgid "No hardware detected - commands will have no effect"
+msgstr "No hardware detected - commands will have no effect"
+
+msgid "Enabling equalizer: error ({error})"
+msgstr "Enabling equalizer: error ({error})"
+
+msgid "Equalizer enabled"
+msgstr "Equalizer enabled"
+
+msgid "Direct Mode: reconnecting the device…"
+msgstr "Direct Mode: reconnecting the device…"
+
+msgid "Device reconnected"
+msgstr "Device reconnected"
+
+msgid "{label}: sending command…"
+msgstr "{label}: sending command…"
+
+msgid "{label} enabled"
+msgstr "{label} enabled"
+
+msgid "{label} disabled"
+msgstr "{label} disabled"
+
+msgid "{label}: error ({error})"
+msgstr "{label}: error ({error})"
+
+msgid "{label}: command failed (see console)"
+msgstr "{label}: command failed (see console)"
+
+msgid "Sound Mode \"{label}\": sending command…"
+msgstr "Sound Mode \"{label}\": sending command…"
+
+msgid "Sound Mode: error ({error})"
+msgstr "Sound Mode: error ({error})"
+
+msgid "Sound Mode \"{label}\" applied"
+msgstr "Sound Mode \"{label}\" applied"
+
+msgid "Sound Mode \"{label}\": command failed (see console)"
+msgstr "Sound Mode \"{label}\": command failed (see console)"
+
+msgid "Quit"
+msgstr "Quit"
+
+msgid "Do you want to quit the application?"
+msgstr "Do you want to quit the application?"
+
+msgid "Bands"
+msgstr "Bands"
+
+msgid "Preamp"
+msgstr "Preamp"
+
+msgid "Gain"
+msgstr "Gain"
+
+msgid "Tone (approximate)"
+msgstr "Tone (approximate)"
+
+msgid "Bass"
+msgstr "Bass"
+
+msgid "Treble"
+msgstr "Treble"
+
+msgid "Quick Presets"
+msgstr "Quick Presets"
+
+msgid "Reset All"
+msgstr "Reset All"
+
+msgid "Flat"
+msgstr "Flat"
+
+msgid "Bass Boost"
+msgstr "Bass Boost"
+
+msgid "Vocal"
+msgstr "Vocal"
+
+msgid "Gaming"
+msgstr "Gaming"
+
+msgid "Movie"
+msgstr "Movie"
+
+msgid "Band {band}"
+msgstr "Band {band}"
+
+msgid "{label}: sending {value:+.1f} dB…"
+msgstr "{label}: sending {value:+.1f} dB…"
+
+msgid "{label}: {value:+.1f} dB applied"
+msgstr "{label}: {value:+.1f} dB applied"
+
+msgid "{label}: sending {value:+.1f} dB (approximate)…"
+msgstr "{label}: sending {value:+.1f} dB (approximate)…"
+
+msgid "{label}: {value:+.1f} dB applied (approximate)"
+msgstr "{label}: {value:+.1f} dB applied (approximate)"
+
+msgid "Preset \"{label}\" applied"
+msgstr "Preset \"{label}\" applied"

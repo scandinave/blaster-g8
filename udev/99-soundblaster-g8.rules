@@ -1,34 +1,34 @@
-# Règles udev pour la Creative Sound Blaster G8 (VID 041e / PID 329b)
+# udev rules for the Creative Sound Blaster G8 (VID 041e / PID 329b)
 #
-# Installation :
+# Installation:
 #   sudo cp udev/99-soundblaster-g8.rules /etc/udev/rules.d/
 #   sudo udevadm control --reload-rules && sudo udevadm trigger
 #
-# Les deux règles ci-dessous couvrent les deux backends hidapi utilisables :
-#   * hidraw  -> accès direct à /dev/hidrawX  (1re règle)
-#   * libusb  -> accès au device USB parent   (2e règle)
-# Voir soundblaster_g8/hidbackend.py pour la sélection du backend.
+# The two rules below cover the two usable hidapi backends:
+#   * hidraw  -> direct access to /dev/hidrawX  (1st rule)
+#   * libusb  -> access to the parent USB device (2nd rule)
+# See soundblaster_g8/hidbackend.py for backend selection.
 #
-# Notes sur les droits :
-#   * TAG+="uaccess" suffit pour un usage normal : systemd-logind donne alors
-#     l'accès à l'utilisateur de la *session locale* courante, sans groupe ni
-#     MODE="0666" global. C'est le mécanisme à privilégier.
-#   * GROUP="plugdev" est simplement **ignoré** sur les distributions qui n'ont
-#     pas ce groupe (Fedora, Arch, openSUSE...) : udev journalise un
-#     avertissement « unknown group » et la règle continue de s'appliquer. On
-#     le garde pour Debian/Ubuntu, où il permet aussi les sessions distantes.
-#   * MODE="0660" sans uaccess ni groupe correspondant = accès root seulement.
+# Notes on permissions:
+#   * TAG+="uaccess" is enough for normal use: systemd-logind then grants
+#     access to the current *local session*'s user, with no group or global
+#     MODE="0666" needed. This is the mechanism to prefer.
+#   * GROUP="plugdev" is simply **ignored** on distributions that don't have
+#     that group (Fedora, Arch, openSUSE...): udev logs an "unknown group"
+#     warning and the rule still applies. Kept for Debian/Ubuntu, where it
+#     also allows remote sessions.
+#   * MODE="0660" with neither uaccess nor a matching group = root-only access.
 
-# 1) Noeuds hidraw : interface HID de contrôle (usage page 0xFF01) et
-#    interface Consumer. C'est ce que le backend hidraw ouvre.
+# 1) hidraw nodes: control HID interface (usage page 0xFF01) and the
+#    Consumer interface. This is what the hidraw backend opens.
 KERNEL=="hidraw*", ATTRS{idVendor}=="041e", ATTRS{idProduct}=="329b", \
     MODE="0660", GROUP="plugdev", TAG+="uaccess"
 
-# 2) Device USB parent. **Obligatoire pour le backend libusb** : celui-ci
-#    n'utilise pas /dev/hidrawX mais ouvre le device via usbfs
-#    (/dev/bus/usb/BBB/DDD) et doit détacher le driver noyau usbhid de
-#    l'interface 4 avant de pouvoir émettre le SET_REPORT. Sans cette règle,
-#    l'ouverture échoue avec LIBUSB_ERROR_ACCESS.
-#    Utile aussi pour les diagnostics 'lsusb -v' sans sudo.
+# 2) Parent USB device. **Mandatory for the libusb backend**: it doesn't
+#    use /dev/hidrawX but opens the device via usbfs
+#    (/dev/bus/usb/BBB/DDD) and must detach the usbhid kernel driver from
+#    interface 4 before it can issue SET_REPORT. Without this rule, opening
+#    fails with LIBUSB_ERROR_ACCESS.
+#    Also useful for 'lsusb -v' diagnostics without sudo.
 SUBSYSTEM=="usb", ATTR{idVendor}=="041e", ATTR{idProduct}=="329b", \
     MODE="0660", GROUP="plugdev", TAG+="uaccess"

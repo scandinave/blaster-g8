@@ -1,18 +1,18 @@
 """
-Page Égaliseur (10 bandes + Préampli/Basse/Aigus) pour la Sound Blaster G8.
+Equalizer page (10 bands + Preamp/Bass/Treble) for the Sound Blaster G8.
 
-Page intégrée à ``MainWindow`` (pas de fenêtre flottante) : voir
-``main_window.py`` pour la navigation (``_show_eq_page``/``_show_main_page``).
-Chaque bande et le Préampli se pilotent avec le même mécanisme validé sur le
-matériel que le Mode Sonore (``CMD_SET_FLOAT``, voir ``driver.eq_set_band``/
-``driver.eq_set_preamp``). Basse et Aigus n'ont pas de paramètre dédié sur la
-carte : voir ``controller.set_eq_bass``/``set_eq_treble`` pour l'approximation
-utilisée (dérivée de la capture ``Equalizer-manual.pcapng``) - ces deux
-sliders restent à la position posée par l'utilisateur (comme l'app Creative
-native), le contrôleur ne mémorisant qu'un delta interne.
+Page embedded in ``MainWindow`` (no floating window): see ``main_window.py``
+for navigation (``_show_eq_page``/``_show_main_page``). Each band and the
+Preamp use the same hardware-validated mechanism as Sound Mode
+(``CMD_SET_FLOAT``, see ``driver.eq_set_band``/``driver.eq_set_preamp``).
+Bass and Treble have no dedicated parameter on the card: see
+``controller.set_eq_bass``/``set_eq_treble`` for the approximation used
+(derived from the ``Equalizer-manual.pcapng`` capture) - these two sliders
+stay wherever the user leaves them (like the native Creative app), the
+controller only keeping an internal delta.
 
-Cartes et sliders reprennent le style du mockup de design (fond sombre,
-piste fine + curseur rond) : voir ``theme.py``/``widgets.py``.
+Cards and sliders follow the design mockup's style (dark background, thin
+track + round thumb): see ``theme.py``/``widgets.py``.
 """
 
 import threading
@@ -20,8 +20,10 @@ import tkinter as tk
 from typing import Callable, Optional
 
 from ..controller import SoundBlasterController
-from . import theme, widgets
+from . import i18n, theme, widgets
 
+#: Preset name -> display-text msgid (identity translation in both
+#: languages - these are already language-neutral preset names).
 PRESET_LABELS = {
     "flat": "Flat",
     "bass_boost": "Bass Boost",
@@ -32,29 +34,31 @@ PRESET_LABELS = {
 
 
 class EQPanel(tk.Frame):
-    """Page intégrée pour l'égaliseur 10 bandes + Préampli/Basse/Aigus."""
+    """Embedded page for the 10-band equalizer + Preamp/Bass/Treble."""
 
     FREQUENCY_BANDS = [
         "32 Hz", "64 Hz", "125 Hz", "250 Hz", "500 Hz",
         "1 kHz", "2 kHz", "4 kHz", "8 kHz", "16 kHz"
     ]
 
-    #: Hauteur de piste des sliders verticaux (Bandes/Préampli/Tonalité).
+    #: Track height of the vertical sliders (Bands/Preamp/Tone).
     SLIDER_HEIGHT = 180
 
     def __init__(
         self,
         parent,
         controller: SoundBlasterController,
-        status_callback: Optional[Callable[[str], None]] = None,
+        status_callback: Optional[Callable[..., None]] = None,
     ):
-        """Initialise la page EQ.
+        """Initializes the EQ page.
 
         Args:
-            parent: conteneur parent (la page EQ de MainWindow)
-            controller: instance du contrôleur SoundBlaster
-            status_callback: callback optionnel pour afficher le statut d'une
-                écriture de bande/slider dans la barre de statut partagée
+            parent: parent container (MainWindow's EQ page)
+            controller: SoundBlaster controller instance
+            status_callback: optional callback to display a band/slider
+                write's status in the shared status bar; called as
+                ``status_callback(msgid_template, **kwargs)``, matching
+                ``MainWindow._set_status``'s signature
         """
         super().__init__(parent, bg=theme.BG_WINDOW)
 
@@ -62,13 +66,13 @@ class EQPanel(tk.Frame):
         self._status_callback = status_callback
         self._band_vars: list[tk.DoubleVar] = []
         self._preamp_var = tk.DoubleVar(value=controller.get_eq_preamp())
-        # Basse/Aigus n'ont pas de paramètre dédié sur la carte, mais leur
-        # position reste affichée telle que posée par l'utilisateur (voir
+        # Bass/Treble have no dedicated parameter on the card, but their
+        # position stays displayed as the user left it (see
         # controller.set_eq_bass/set_eq_treble).
         self._bass_var = tk.DoubleVar(value=controller.get_eq_bass())
         self._treble_var = tk.DoubleVar(value=controller.get_eq_treble())
 
-        # Charger les bandes actuelles
+        # Load the current bands
         eq_bands = controller.get_eq_all_bands()
         for value in eq_bands:
             var = tk.DoubleVar(value=value)
@@ -77,25 +81,30 @@ class EQPanel(tk.Frame):
         self._setup_ui()
 
     def _setup_ui(self):
-        """Configure l'interface de l'égaliseur.
+        """Sets up the equalizer UI.
 
-        Sliders verticaux côte à côte dans une seule rangée, dans l'ordre
-        Bandes -> Préampli -> Tonalité (chaque groupe garde son libellé, un
-        séparateur fin les distingue visuellement sans revenir à des cartes
-        empilées séparées).
+        Vertical sliders side by side in a single row, in the order
+        Bands -> Preamp -> Tone (each group keeps its own label, a thin
+        separator visually distinguishes them without going back to
+        separate stacked cards).
         """
         self._sliders: list[widgets.Slider] = []
         self._labels: list[tk.Label] = []
+        #: (label_widget, translation_msgid) pairs for section titles that
+        #: need re-translating in place (retranslate()).
+        self._section_labels: list[tuple[tk.Label, str]] = []
+        #: RoundedButton preset widgets, keyed by preset name, for retranslate().
+        self._preset_buttons: dict[str, widgets.RoundedButton] = {}
 
         container = tk.Frame(self, bg=theme.BG_WINDOW)
         container.pack(fill=tk.BOTH, expand=True, padx=36, pady=(16, 0))
 
-        sliders_card = self._build_card(container, "Égaliseur")
+        sliders_card = self._build_card(container, "Equalizer")
         row = tk.Frame(sliders_card, bg=theme.BG_CARD)
         row.pack(anchor="w")
 
-        # Bandes (10 colonnes)
-        bands_group = self._build_group(row, "Bandes")
+        # Bands (10 columns)
+        bands_group = self._build_group(row, "Bands")
         for i in range(len(self._band_vars)):
             slider, label = self._add_slider_column(
                 bands_group, self.FREQUENCY_BANDS[i], self._band_vars[i],
@@ -106,33 +115,33 @@ class EQPanel(tk.Frame):
 
         self._add_group_separator(row)
 
-        # Préampli - même mécanique qu'une bande (paramètre dédié, exact)
-        preamp_group = self._build_group(row, "Préampli")
+        # Preamp - same mechanics as a band (dedicated parameter, exact)
+        preamp_group = self._build_group(row, "Preamp")
         self._preamp_slider, self._preamp_label = self._add_slider_column(
             preamp_group, "Gain", self._preamp_var, self._commit_preamp,
         )
 
         self._add_group_separator(row)
 
-        # Basse / Aigus - approximation (voir docstring du module)
-        tilt_group = self._build_group(row, "Tonalité (approximatif)")
+        # Bass / Treble - approximation (see module docstring)
+        tilt_group = self._build_group(row, "Tone (approximate)")
         self._bass_slider, self._bass_label = self._add_slider_column(
-            tilt_group, "Basse", self._bass_var,
-            lambda: self._commit_tilt("Basse", self._bass_var, self.controller.set_eq_bass),
+            tilt_group, "Bass", self._bass_var,
+            lambda: self._commit_tilt(i18n._("Bass"), self._bass_var, self.controller.set_eq_bass),
         )
         self._treble_slider, self._treble_label = self._add_slider_column(
-            tilt_group, "Aigus", self._treble_var,
-            lambda: self._commit_tilt("Aigus", self._treble_var, self.controller.set_eq_treble),
+            tilt_group, "Treble", self._treble_var,
+            lambda: self._commit_tilt(i18n._("Treble"), self._treble_var, self.controller.set_eq_treble),
         )
 
-        # Cadre des presets
-        presets_card = self._build_card(container, "Presets Rapides")
+        # Presets frame
+        presets_card = self._build_card(container, "Quick Presets")
         preset_row = tk.Frame(presets_card, bg=theme.BG_CARD)
         preset_row.pack(fill=tk.X)
         for preset in ("flat", "bass_boost", "vocal", "gaming", "movie"):
-            widgets.RoundedButton(
+            button = widgets.RoundedButton(
                 preset_row,
-                text=PRESET_LABELS[preset],
+                text=i18n._(PRESET_LABELS[preset]),
                 command=lambda p=preset: self._apply_preset(p),
                 icon="equalizer",
                 bg=theme.BG_CARD,
@@ -141,14 +150,16 @@ class EQPanel(tk.Frame):
                 font=theme.FONT_BODY,
                 padx=16,
                 pady=10,
-            ).pack(side=tk.LEFT, padx=(0, 12))
+            )
+            button.pack(side=tk.LEFT, padx=(0, 12))
+            self._preset_buttons[preset] = button
 
-        # Commande de réinitialisation
+        # Reset command
         cmd_frame = tk.Frame(container, bg=theme.BG_WINDOW)
         cmd_frame.pack(fill=tk.X, pady=(0, 20))
-        widgets.RoundedButton(
+        self._reset_button = widgets.RoundedButton(
             cmd_frame,
-            text="Réinitialiser tout",
+            text=i18n._("Reset All"),
             command=self._reset_all,
             icon="reset",
             bg=theme.BG_WINDOW,
@@ -157,14 +168,17 @@ class EQPanel(tk.Frame):
             font=theme.FONT_BODY,
             padx=16,
             pady=10,
-        ).pack(side=tk.RIGHT)
+        )
+        self._reset_button.pack(side=tk.RIGHT)
 
-    def _build_card(self, parent, title: str) -> tk.Frame:
-        """Construit une carte de section (label + cadre bordé) et retourne l'intérieur."""
-        tk.Label(
-            parent, text=title, bg=theme.BG_WINDOW, fg=theme.FG_LABEL,
+    def _build_card(self, parent, title_msgid: str) -> tk.Frame:
+        """Builds a section card (label + bordered frame) and returns the inside."""
+        label = tk.Label(
+            parent, text=i18n._(title_msgid), bg=theme.BG_WINDOW, fg=theme.FG_LABEL,
             font=theme.FONT_LABEL, anchor="w",
-        ).pack(fill=tk.X, pady=(0, 10))
+        )
+        label.pack(fill=tk.X, pady=(0, 10))
+        self._section_labels.append((label, title_msgid))
 
         card = tk.Frame(
             parent, bg=theme.BG_CARD, highlightbackground=theme.BORDER_CARD,
@@ -176,27 +190,29 @@ class EQPanel(tk.Frame):
         inner.pack(fill=tk.BOTH, expand=True, padx=20, pady=18)
         return inner
 
-    def _build_group(self, parent, title: str) -> tk.Frame:
-        """Sous-groupe de colonnes (titre + rangée de sliders verticaux).
+    def _build_group(self, parent, title_msgid: str) -> tk.Frame:
+        """Sub-group of columns (title + row of vertical sliders).
 
-        Empilé côte à côte avec les autres groupes (``pack(side=tk.LEFT)``)
-        dans la même rangée : garde un regroupement visuel/label sans revenir
-        à des cartes séparées empilées verticalement.
+        Packed side by side with the other groups (``pack(side=tk.LEFT)``)
+        in the same row: keeps a visual/label grouping without going back
+        to separate cards stacked vertically.
         """
         group = tk.Frame(parent, bg=theme.BG_CARD)
         group.pack(side=tk.LEFT, anchor="n")
 
-        tk.Label(
-            group, text=title, bg=theme.BG_CARD, fg=theme.FG_LABEL,
+        label = tk.Label(
+            group, text=i18n._(title_msgid), bg=theme.BG_CARD, fg=theme.FG_LABEL,
             font=theme.FONT_LABEL, anchor="w",
-        ).pack(fill=tk.X, pady=(0, 12))
+        )
+        label.pack(fill=tk.X, pady=(0, 12))
+        self._section_labels.append((label, title_msgid))
 
         columns = tk.Frame(group, bg=theme.BG_CARD)
         columns.pack()
         return columns
 
     def _add_group_separator(self, parent) -> None:
-        """Séparateur fin entre deux groupes de colonnes."""
+        """Thin separator between two column groups."""
         tk.Frame(parent, bg=theme.BORDER_CARD, width=1).pack(
             side=tk.LEFT, fill=tk.Y, padx=16, pady=4,
         )
@@ -204,15 +220,15 @@ class EQPanel(tk.Frame):
     def _add_slider_column(
         self,
         parent,
-        label_text: str,
+        label_msgid: str,
         var: tk.DoubleVar,
         on_release: Callable[[], None],
     ) -> tuple[widgets.Slider, tk.Label]:
-        """Construit une colonne slider vertical (valeur, curseur, libellé).
+        """Builds a vertical slider column (value, thumb, label).
 
-        Le curseur suit le glissement (affichage local) ; l'envoi matériel
-        se fait au relâchement (``on_release``) pour ne pas saturer le canal
-        de contrôle HID.
+        The thumb follows the drag (local display); the hardware write
+        happens on release (``on_release``) so the HID control channel
+        isn't flooded.
         """
         column = tk.Frame(parent, bg=theme.BG_CARD)
         column.pack(side=tk.LEFT, padx=8)
@@ -234,20 +250,33 @@ class EQPanel(tk.Frame):
         )
         slider.pack()
 
-        tk.Label(
-            column, text=label_text, anchor="center",
+        name_label = tk.Label(
+            column, text=i18n._(label_msgid), anchor="center",
             bg=theme.BG_CARD, fg=theme.FG_PRIMARY, font=theme.FONT_BODY,
-        ).pack(pady=(10, 0))
+        )
+        name_label.pack(pady=(10, 0))
+        self._section_labels.append((name_label, label_msgid))
 
         return slider, value_label
 
-    def refresh(self) -> None:
-        """Resynchronise tous les sliders sur l'état connu du contrôleur.
+    def retranslate(self) -> None:
+        """Registered indirectly via ``MainWindow._retranslate``: re-applies
+        every static text in place (band/frequency labels, section titles,
+        preset and reset buttons). Numeric value labels (dB) need no
+        translation."""
+        for label, msgid in self._section_labels:
+            label.config(text=i18n._(msgid))
+        for preset, button in self._preset_buttons.items():
+            button.set_text(i18n._(PRESET_LABELS[preset]))
+        self._reset_button.set_text(i18n._("Reset All"))
 
-        Appelé par ``MainWindow`` après une sélection de mode sonore ou une
-        activation « plate » de l'égaliseur (``prepare_eq_page``), qui
-        remplacent les bandes/Préampli et réinitialisent Basse/Aigus à 0
-        sans passer par cette page.
+    def refresh(self) -> None:
+        """Resynchronizes all sliders with the controller's known state.
+
+        Called by ``MainWindow`` after a sound-mode selection or a "flat"
+        equalizer activation (``prepare_eq_page``), which replace the
+        bands/Preamp and reset Bass/Treble to 0 without going through this
+        page.
         """
         eq_bands = self.controller.get_eq_all_bands()
         for i, var in enumerate(self._band_vars):
@@ -265,41 +294,41 @@ class EQPanel(tk.Frame):
         self._treble_label.config(text=f"{treble:+.1f} dB")
 
     def _commit_band(self, index: int):
-        """Envoie la valeur d'une bande à la carte (au relâchement du curseur)."""
+        """Sends a band's value to the card (on thumb release)."""
         if not (0 <= index < len(self._band_vars)):
             return
         value = self._band_vars[index].get()
-        label = self.FREQUENCY_BANDS[index]
+        label = i18n._("Band {band}").format(band=self.FREQUENCY_BANDS[index])
         self._run_commit(
-            f"Bande {label}", value,
+            label, value,
             lambda: self.controller.set_eq_band(index, value),
         )
 
     def _commit_preamp(self):
-        """Envoie la valeur du Préampli à la carte (au relâchement du curseur)."""
+        """Sends the Preamp value to the card (on thumb release)."""
         value = self._preamp_var.get()
         self._run_commit(
-            "Préampli", value,
+            i18n._("Preamp"), value,
             lambda: self.controller.set_eq_preamp(value),
         )
 
     def _commit_tilt(self, label: str, var: tk.DoubleVar, setter: Callable[[float], bool]):
-        """Envoie une nouvelle position Basse/Aigus (approximatif).
+        """Sends a new Bass/Treble position (approximate).
 
-        Le slider reste où l'utilisateur l'a posé (voir
-        ``controller.set_eq_bass``/``set_eq_treble``) : seules les 10 bandes
-        affichées sont resynchronisées après coup, l'approximation les
-        modifiant toutes.
+        The slider stays wherever the user left it (see
+        ``controller.set_eq_bass``/``set_eq_treble``): only the 10 displayed
+        bands are resynchronized afterwards, since the approximation
+        modifies all of them.
         """
         value = var.get()
-        self._set_status(f"{label} : envoi de {value:+.1f} dB (approximatif)…")
+        self._set_status("{label}: sending {value:+.1f} dB (approximate)…", label=label, value=value)
 
         def worker():
             error: Optional[Exception] = None
             ok = False
             try:
                 ok = bool(setter(value))
-            except Exception as exc:  # pragma: no cover - dépend du matériel
+            except Exception as exc:  # pragma: no cover - depends on hardware
                 error = exc
             self.after(0, lambda: self._finish_tilt(label, value, ok, error))
 
@@ -308,22 +337,22 @@ class EQPanel(tk.Frame):
     def _finish_tilt(self, label: str, value: float, ok: bool, error: Optional[Exception]):
         self.refresh()
         if error is not None:
-            self._set_status(f"{label} : erreur ({error})")
+            self._set_status("{label}: error ({error})", label=label, error=error)
         elif ok:
-            self._set_status(f"{label} : {value:+.1f} dB appliqué (approximatif)")
+            self._set_status("{label}: {value:+.1f} dB applied (approximate)", label=label, value=value)
         else:
-            self._set_status(f"{label} : échec de la commande (voir la console)")
+            self._set_status("{label}: command failed (see console)", label=label)
 
     def _run_commit(self, label: str, value: float, action: Callable[[], bool]):
-        """Exécute une écriture matérielle unique dans un thread de travail."""
-        self._set_status(f"{label} : envoi de {value:+.1f} dB…")
+        """Runs a single hardware write in a worker thread."""
+        self._set_status("{label}: sending {value:+.1f} dB…", label=label, value=value)
 
         def worker():
             error: Optional[Exception] = None
             ok = False
             try:
                 ok = bool(action())
-            except Exception as exc:  # pragma: no cover - dépend du matériel
+            except Exception as exc:  # pragma: no cover - depends on hardware
                 error = exc
             self.after(0, lambda: self._finish_commit(label, value, ok, error))
 
@@ -331,22 +360,23 @@ class EQPanel(tk.Frame):
 
     def _finish_commit(self, label: str, value: float, ok: bool, error: Optional[Exception]):
         if error is not None:
-            self._set_status(f"{label} : erreur ({error})")
+            self._set_status("{label}: error ({error})", label=label, error=error)
         elif ok:
-            self._set_status(f"{label} : {value:+.1f} dB appliquée")
+            self._set_status("{label}: {value:+.1f} dB applied", label=label, value=value)
         else:
-            self._set_status(f"{label} : échec de la commande (voir la console)")
+            self._set_status("{label}: command failed (see console)", label=label)
 
-    def _set_status(self, text: str) -> None:
+    def _set_status(self, template: str, **kwargs) -> None:
         if self._status_callback is not None:
-            self._status_callback(text)
+            self._status_callback(template, **kwargs)
 
     def _apply_preset(self, preset_name: str):
-        """Applique un preset à toutes les bandes."""
+        """Applies a preset to all bands."""
         self.controller.load_preset(preset_name)
         self.refresh()
-        self._set_status(f"Preset « {PRESET_LABELS.get(preset_name, preset_name)} » appliqué")
+        label = i18n._(PRESET_LABELS.get(preset_name, preset_name))
+        self._set_status('Preset "{label}" applied', label=label)
 
     def _reset_all(self):
-        """Réinitialise toutes les bandes à 0 dB."""
+        """Resets all bands to 0 dB."""
         self._apply_preset("flat")

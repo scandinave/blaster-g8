@@ -1,24 +1,23 @@
 """
-Correctif ALSA pour le microphone de la Sound Blaster G8 sous Linux.
+ALSA fix for the Sound Blaster G8's microphone on Linux.
 
-Le pilote noyau ``snd-usb-audio`` initialise le contrôle ALSA
-« PCM Capture Source » sur ``Line In`` au lieu de ``External Mic`` : le
-microphone ne capte donc rien tant qu'on n'a pas changé la source manuellement
-(alsamixer/pavucontrol), à chaque redémarrage de la carte.
+The ``snd-usb-audio`` kernel driver initializes the ALSA "PCM Capture
+Source" control to ``Line In`` instead of ``External Mic``: the microphone
+therefore picks up nothing until the source is changed manually
+(alsamixer/pavucontrol), on every card restart.
 
-Ce module réapplique le correctif au démarrage de l'application. Il existe
-aussi un correctif système indépendant (règle udev + script, dossier
-``alsa-fix/`` à la racine du dépôt) qui s'applique même sans lancer l'app :
-les deux mécanismes sont redondants par sécurité.
+This module re-applies the fix on application startup. There's also an
+independent system-level fix (udev rule + script, ``alsa-fix/`` folder at
+the repo root) that applies even without launching the app: the two
+mechanisms are redundant for safety.
 
-Découverte de la carte via ``/proc/asound/card*/usbid`` (fourni par le noyau,
-jamais localisé) plutôt qu'en parsant la sortie de ``aplay -l``, qui est
-localisée (``carte 1 : ...`` en français au lieu de ``card 1: ...``) et rend le
-matching par nom de carte non fiable.
+Card discovery via ``/proc/asound/card*/usbid`` (provided by the kernel,
+never localized) rather than by parsing ``aplay -l``'s output, which is
+localized (e.g. ``carte 1 : ...`` in French instead of ``card 1: ...``) and
+makes matching by card name unreliable.
 
-Ciblage du contrôle par nom (``amixer sset 'PCM Capture Source' ...``) plutôt
-que par ``numid``, qui peut se renuméroter d'une version de pilote/noyau à
-l'autre.
+Control targeting by name (``amixer sset 'PCM Capture Source' ...``) rather
+than by ``numid``, which can be renumbered between driver/kernel versions.
 """
 
 from __future__ import annotations
@@ -39,10 +38,10 @@ def _log(message: str) -> None:
 
 
 def find_card_index(vendor_id: int, product_id: int) -> Optional[int]:
-    """Trouve l'index de carte ALSA correspondant au VID:PID donné.
+    """Finds the ALSA card index matching the given VID:PID.
 
-    Lit ``/proc/asound/card*/usbid`` (ex. ``041e:329b``) : contrairement à
-    ``aplay -l``, ce fichier n'est jamais localisé.
+    Reads ``/proc/asound/card*/usbid`` (e.g. ``041e:329b``): unlike
+    ``aplay -l``, this file is never localized.
     """
     target = f"{vendor_id:04x}:{product_id:04x}"
     for usbid_path in sorted(glob.glob("/proc/asound/card*/usbid")):
@@ -62,19 +61,18 @@ def find_card_index(vendor_id: int, product_id: int) -> Optional[int]:
 
 
 def ensure_microphone_source(vendor_id: int, product_id: int) -> bool:
-    """Sélectionne ``External Mic`` comme source de capture ALSA.
+    """Selects ``External Mic`` as the ALSA capture source.
 
-    Ne fait rien (et ne lève jamais) hors Linux, si la carte ALSA n'est pas
-    trouvée, si ``amixer`` est absent, ou si la commande échoue : ce correctif
-    est un « best effort » qui ne doit jamais empêcher l'application de
-    démarrer.
+    Does nothing (and never raises) outside Linux, if the ALSA card isn't
+    found, if ``amixer`` is missing, or if the command fails: this fix is a
+    "best effort" that must never prevent the application from starting.
     """
     if platform.system() != "Linux":
         return False
 
     card_index = find_card_index(vendor_id, product_id)
     if card_index is None:
-        _log("carte ALSA introuvable (/proc/asound/card*/usbid) : correctif ignoré")
+        _log("ALSA card not found (/proc/asound/card*/usbid): fix skipped")
         return False
 
     try:
@@ -93,21 +91,21 @@ def ensure_microphone_source(vendor_id: int, product_id: int) -> bool:
             timeout=AMIXER_TIMEOUT_S,
         )
     except FileNotFoundError:
-        _log("commande 'amixer' introuvable (paquet alsa-utils manquant) : correctif ignoré")
+        _log("'amixer' command not found (alsa-utils package missing): fix skipped")
         return False
     except subprocess.TimeoutExpired:
-        _log(f"'amixer' n'a pas répondu (carte {card_index}) : correctif ignoré")
+        _log(f"'amixer' didn't respond (card {card_index}): fix skipped")
         return False
     except OSError as exc:
-        _log(f"échec de l'appel à 'amixer' (carte {card_index}): {exc}")
+        _log(f"'amixer' call failed (card {card_index}): {exc}")
         return False
 
     if result.returncode != 0:
         _log(
-            f"échec de la sélection de source de capture (carte {card_index}): "
+            f"failed to select capture source (card {card_index}): "
             f"{result.stderr.strip() or result.returncode}"
         )
         return False
 
-    _log(f"source de capture réglée sur '{CAPTURE_SOURCE_TARGET}' (carte {card_index})")
+    _log(f"capture source set to '{CAPTURE_SOURCE_TARGET}' (card {card_index})")
     return True

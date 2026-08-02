@@ -1,8 +1,8 @@
-"""Thème sombre (couleurs, polices, styles ttk) pour l'interface Sound Blaster G8.
+"""Dark theme (colors, fonts, ttk styles) for the Sound Blaster G8 interface.
 
-Palette et typographie reprises du mockup de design (claude.ai/design,
-« Sound Blaster G8.dc.html ») : fond anthracite, accent bleu sur les
-interrupteurs actifs, cartes légèrement plus claires pour l'égaliseur.
+Palette and typography taken from the design mockup (claude.ai/design,
+"Sound Blaster G8.dc.html"): anthracite background, blue accent on active
+switches, slightly lighter cards for the equalizer.
 """
 
 import tkinter as tk
@@ -38,7 +38,7 @@ FONT_BUTTON = (FONT_FAMILY, 10, "bold")
 
 
 def apply_theme(root: tk.Misc) -> None:
-    """Configure le thème sombre global : fond de fenêtre + styles ttk."""
+    """Configures the global dark theme: window background + ttk styles."""
     root.configure(bg=BG_WINDOW)
 
     style = ttk.Style(root)

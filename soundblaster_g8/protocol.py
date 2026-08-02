@@ -1,166 +1,163 @@
 """
-Protocole HID vendor de la Creative Sound Blaster G8.
+Creative Sound Blaster G8 vendor HID protocol.
 
-Ce module ne fait *aucune* I/O : il encode et décode uniquement les trames.
-Tout ce qui suit a été déduit de captures USB (tshark) de l'activation puis de
-la désactivation du Scout Mode et du Direct Mode par l'application Creative
-officielle (``DirectModeOffpcapng.pcapng``).
+This module does *no* I/O: it only encodes and decodes frames. Everything
+below was deduced from USB captures (tshark) of the official Creative
+application turning Scout Mode and Direct Mode on then off
+(``DirectModeOffpcapng.pcapng``).
 
-Topologie USB observée
+Observed USB topology
 ----------------------
-La carte expose deux interfaces HID (VID 041e / PID 329b) :
+The card exposes two HID interfaces (VID 041e / PID 329b):
 
-* interface 3, usage page 0x000C (Consumer)   -> touches média, input 16 o
-* interface 4, usage page 0xFF01 (Vendor)     -> **canal de contrôle**,
-  input 64 o (EP 0x85, interrupt IN). Le descripteur ne déclare **aucun**
-  report ID et surtout **aucun endpoint interrupt OUT** :
+* interface 3, usage page 0x000C (Consumer)   -> media keys, 16 B input
+* interface 4, usage page 0xFF01 (Vendor)     -> **control channel**,
+  64 B input (EP 0x85, interrupt IN). The descriptor declares **no**
+  report ID and, notably, **no interrupt OUT endpoint**:
   ``0601ff0901a101 1901 2940 1500 26ff00 7508 9540 8100 1901 2940 9100 c0``.
 
-Sens hôte -> carte : un seul transport
+Host -> card direction: a single transport
 --------------------------------------
-Faute d'endpoint OUT, toute écriture est un transfert de **contrôle**
-HID SET_REPORT. La capture montre un transport unique, y compris pour le
-Scout Mode :
+With no OUT endpoint, every write is a HID **control** transfer
+(SET_REPORT). The capture shows a single transport, including for Scout
+Mode:
 
     bmRequestType = 0x21   (Host->Device, Class, Interface)
     bRequest      = 0x09   (SET_REPORT)
     wValue        = 0x0200 (report type 0x02 = Output, report ID 0x00)
-    wIndex        = 4      (numéro d'interface)
-    wLength       = 64     (taille du rapport, trame zéro-paddée)
+    wIndex        = 4      (interface number)
+    wLength       = 64     (report size, zero-padded frame)
 
-La trame utile commence donc *dans* le rapport, par le magic 0x5A, et le
-rapport est complété par des zéros jusqu'à 64 octets (:func:`pad_report`) :
+The useful frame therefore starts *inside* the report, with magic 0x5A, and
+the report is padded with zeros up to 64 bytes (:func:`pad_report`):
 
-    Scout ON    : 5a 26 05 07 02 00 01 00  + 56 zéros
-    Scout OFF   : 5a 26 05 07 02 00 00 00  + 56 zéros
-    Direct ON   : 5a 39 03 00 05 01        + 58 zéros
-    Direct OFF  : 5a 39 03 00 05 00        + 58 zéros
+    Scout ON    : 5a 26 05 07 02 00 01 00  + 56 zeros
+    Scout OFF   : 5a 26 05 07 02 00 00 00  + 56 zeros
+    Direct ON   : 5a 39 03 00 05 01        + 58 zeros
+    Direct OFF  : 5a 39 03 00 05 00        + 58 zeros
 
-Côté Python, ``hid_write()`` consomme le **premier octet comme report ID** :
-on écrit donc ``b"\\x00" + pad_report(frame)`` (65 octets) pour obtenir
-``wValue = 0x0200`` et ``wLength = 64``.
+On the Python side, ``hid_write()`` consumes the **first byte as the report
+ID**: so we write ``b"\\x00" + pad_report(frame)`` (65 bytes) to get
+``wValue = 0x0200`` and ``wLength = 64``.
 
-Les trois chemins hidapi possibles
+The three possible hidapi paths
 ----------------------------------
 +----------------+-------------------------------------------------+---------------+
-| Backend        | Ce que fait ``hid_write(b"\\x00" + 64 o)``        | ``usage_page``|
+| Backend        | What ``hid_write(b"\\x00" + 64 B)`` does          | ``usage_page``|
 +================+=================================================+===============+
-| macOS / IOKit  | ``IOHIDDeviceSetReport(Output, id=0, 64 o)``     | renseigné     |
+| macOS / IOKit  | ``IOHIDDeviceSetReport(Output, id=0, 64 B)``     | populated     |
 +----------------+-------------------------------------------------+---------------+
-| Linux / hidraw | ``write(/dev/hidrawN)``, puis repli automatique  | renseigné     |
-|                | sur ``HID_REQ_SET_REPORT`` faute d'EP OUT        | (sysfs)       |
+| Linux / hidraw | ``write(/dev/hidrawN)``, then automatic fallback | populated     |
+|                | to ``HID_REQ_SET_REPORT`` for lack of an OUT EP  | (sysfs)       |
 +----------------+-------------------------------------------------+---------------+
-| Linux / libusb | détache ``usbhid``, pas d'EP OUT -> transfert de | **absent**    |
-|                | contrôle ``SET_REPORT`` direct                   | (toujours 0)  |
+| Linux / libusb | detaches ``usbhid``, no OUT EP -> direct control | **absent**    |
+|                | transfer ``SET_REPORT``                          | (always 0)    |
 +----------------+-------------------------------------------------+---------------+
 
-Conséquence pratique : avec le backend libusb la sélection de l'interface de
-contrôle ne peut pas s'appuyer sur ``usage_page`` (voir
-``driver._select_control_interface``).
+Practical consequence: with the libusb backend, control-interface selection
+can't rely on ``usage_page`` (see ``driver._select_control_interface``).
 
-Sens carte -> hôte
+Card -> host direction
 ------------------
-Notifications de 64 octets sur l'endpoint interrupt IN 0x85 :
+64-byte notifications on interrupt IN endpoint 0x85:
 
-    5a 02 0a 26 00 07 02 00 01 00 ...   -> ACK de la commande 0x26, status 0x00
-    5a 02 0a 39 00 05 00 ...            -> ACK de la commande 0x39, status 0x00
-    5a 39 05 01 00 40 00 00 ...         -> réponse d'état du Direct Mode
-    5a 1a ...                           -> notification « l'état a changé »
-    5a 11 0e 02 00 96 00 <f32> ...      -> dump de paramètres
-    5a 09 ... "1.2.250819.0903"         -> réponse d'info / firmware
+    5a 02 0a 26 00 07 02 00 01 00 ...   -> ACK of command 0x26, status 0x00
+    5a 02 0a 39 00 05 00 ...            -> ACK of command 0x39, status 0x00
+    5a 39 05 01 00 40 00 00 ...         -> Direct Mode state response
+    5a 1a ...                           -> "a setting changed" notification
+    5a 11 0e 02 00 96 00 <f32> ...      -> parameter dump
+    5a 09 ... "1.2.250819.0903"         -> info / firmware response
 
-Reset USB après une bascule du Direct Mode
-------------------------------------------
-Le Direct Mode reconfigure la chaîne audio : la carte se **réénumère**. La
-chronologie du pcap, à partir de l'émission de la commande 0x39 :
+USB reset after toggling Direct Mode
+------------------------------------
+Direct Mode reconfigures the audio chain: the card **re-enumerates**. The
+pcap timeline, starting from the emission of the 0x39 command:
 
     +0.0002 s : ACK 5a 02 0a 39 00 ...
-    +0.005  s : notifications 0x1a puis dumps 0x11
-    +0.6    s : USB reset / disconnect -> l'ancien handle HID est mort
-    +1.3    s : le device réapparaît (nouveau /dev/hidrawN, nouveau path)
+    +0.005  s : 0x1a notifications then 0x11 dumps
+    +0.6    s : USB reset / disconnect -> the old HID handle is dead
+    +1.3    s : the device reappears (new /dev/hidrawN, new path)
 
-Toute écriture sur l'ancien handle après +0.6 s échoue. Le driver doit donc
-fermer, attendre, puis réénumérer et rouvrir (``driver.reconnect``).
+Any write on the old handle after +0.6 s fails. The driver must therefore
+close, wait, then re-enumerate and reopen (``driver.reconnect``).
 
-Framing commun
+Common framing
 --------------
     +------+--------+--------+-----------------+
     | 0x5A | type   | length | payload         |
     +------+--------+--------+-----------------+
        0       1        2       3 .. 3+length
 
-``length`` est la taille du payload (en-tête de 3 octets exclu). Le bit 0x80
-positionné dans ``type`` signale une erreur (observé lorsque la carte reçoit
-une trame invalide : ``5a 11 80 0e ...``).
+``length`` is the payload size (3-byte header excluded). The 0x80 bit set in
+``type`` signals an error (observed when the card receives an invalid
+frame: ``5a 11 80 0e ...``).
 
-Payload d'une commande SET u16 (type 0x26)
+Payload of a SET u16 command (type 0x26)
 ------------------------------------------
     +---------+-----------+----------+
     | feature | param u16 | value u16|
     +---------+-----------+----------+
        0x07      0x0002      0/1        (Scout Mode)
 
-Payload d'un ACK de 0x26 (type 0x02)
+Payload of a 0x26 ACK (type 0x02)
 ------------------------------------
     <cmd echo> <status> <feature> <param u16> <value u16>
     0x26        0x00     0x07      0x0002      0x0001
 
-Payload d'un ACK de 0x39 (type 0x02) - layout **différent**
+Payload of a 0x39 ACK (type 0x02) - **different** layout
 -----------------------------------------------------------
     <cmd echo> <status> <param> <value>
-    0x39        0x00     0x05    0x00        (Direct Mode OFF acquitté)
+    0x39        0x00     0x05    0x00        (Direct Mode OFF acknowledged)
 
-D'où les accesseurs dédiés :attr:`Frame.dm_ack_param` /
-:attr:`Frame.dm_ack_value` : décoder cet ACK avec le layout de 0x26 donne un
-``param`` et une ``value`` faux.
+Hence the dedicated accessors :attr:`Frame.dm_ack_param` /
+:attr:`Frame.dm_ack_value`: decoding this ACK with the 0x26 layout gives a
+wrong ``param`` and ``value``.
 
-Payload d'une commande / réponse Direct Mode (type 0x39)
+Payload of a Direct Mode command / response (type 0x39)
 --------------------------------------------------------
-    écriture : <feature 0x00> <param 0x05> <value 0/1>
-    lecture  : requête  01 20 00 00 00
-               réponse  01 00 40 00 00   -> bit 0x20 de payload[1] = activé
+    write : <feature 0x00> <param 0x05> <value 0/1>
+    read  : request  01 20 00 00 00
+            response 01 00 40 00 00   -> bit 0x20 of payload[1] = enabled
 
-Payload d'un dump de paramètres (type 0x11)
+Payload of a parameter dump (type 0x11)
 -------------------------------------------
-    <count u16> puis ``count`` entrées de 6 octets :
-    <0x96> <param id> <valeur float32 little endian>
+    <count u16> then ``count`` 6-byte entries:
+    <0x96> <param id> <float32 little-endian value>
 
-    ex. ``96 05 a4 70 3d 3f`` -> param 0x05 = 0.74
-        ``96 00 00 00 80 3f`` -> param 0x00 = 1.0
+    e.g. ``96 05 a4 70 3d 3f`` -> param 0x05 = 0.74
+         ``96 00 00 00 80 3f`` -> param 0x00 = 1.0
 
-Payload d'une commande SET FLOAT (type 0x12) - confirmé par les captures
-« Sound Mode »
+Payload of a SET FLOAT command (type 0x12) - confirmed by the "Sound Mode"
+captures
 -------------------------------------------------------------------------
     +------+------+----------+-----------------+
-    | 0x01 | 0x96 | param id | valeur f32 LE    |
+    | 0x01 | 0x96 | param id | f32 LE value     |
     +------+------+----------+-----------------+
 
-``0x96`` est le même marqueur TLV que celui des entrées d'un dump de
-paramètres (type 0x11) : une écriture ``0x12`` a donc la même forme qu'une
-entrée de lecture, préfixée par ``0x01`` (rôle non identifié - constant dans
-toutes les captures observées, laissé tel quel).
+``0x96`` is the same TLV marker as the one found in parameter-dump (type
+0x11) entries: a ``0x12`` write therefore has the same shape as a read
+entry, prefixed with ``0x01`` (role not identified - constant across all
+observed captures, left as-is).
 
     param 0x00        : SBX master (0/1)
-    param 0x01        : gain/compensation master
-    param 0x09        : égaliseur on/off (0/1)
-    params 0x0b..0x14 : les 10 bandes de l'égaliseur, en dB
-    param 0x0a        : Préampli (gain d'entrée, en dB)
+    param 0x01        : master gain/compensation
+    param 0x09        : equalizer on/off (0/1)
+    params 0x0b..0x14 : the 10 equalizer bands, in dB
+    param 0x0a        : Preamp (input gain, in dB)
 
-``param 0x0a`` valait ``0.0`` dans les 51 captures de mode sonore, ce qui
-avait initialement laissé penser à un id de preset (« 0 = manuel »). La
-capture ``Equalizer-manual.pcapng`` (variations individuelles des sliders)
-montre ce même paramètre glissé en continu de ``+6.1`` à ``-8.5``, exactement
-comme une bande EQ : c'est en réalité le slider **Préampli**, simplement
-laissé à 0 dB par tous les modes capturés.
+``param 0x0a`` was ``0.0`` in all 51 sound-mode captures, which initially
+suggested a preset id ("0 = manual"). The ``Equalizer-manual.pcapng``
+capture (individual slider variations) shows this same parameter sliding
+continuously from ``+6.1`` to ``-8.5``, exactly like an EQ band: it's
+actually the **Preamp** slider, simply left at 0 dB by all captured modes.
 
-Un « mode sonore » de l'application Creative (un fichier ``Equalizer-*.pcapng``
-par mode dans les captures fournies) est une séquence ordonnée de ces
-écritures ``0x12`` ; l'ACK carte est ``5a 02 0a 12 00 ...``
-(``Frame.ack_command``/``Frame.ack_status``/``Frame.ack_ok`` suffisent, le
-layout de l'ACK ne suit pas celui de ``0x26``). Aucun reset USB n'est
-déclenché par ces écritures. Voir :mod:`soundblaster_g8.sound_modes` pour les
-séquences extraites des captures et :func:`build_set_float` pour
-l'encodage.
+A Creative application "sound mode" (one ``Equalizer-*.pcapng`` file per
+mode in the provided captures) is an ordered sequence of these ``0x12``
+writes; the card's ACK is ``5a 02 0a 12 00 ...``
+(``Frame.ack_command``/``Frame.ack_status``/``Frame.ack_ok`` suffice, the
+ACK layout doesn't follow ``0x26``'s). No USB reset is triggered by these
+writes. See :mod:`soundblaster_g8.sound_modes` for the sequences extracted
+from the captures and :func:`build_set_float` for the encoding.
 """
 
 from __future__ import annotations
@@ -169,80 +166,80 @@ import struct
 from dataclasses import dataclass, field
 from typing import Optional
 
-# --- Constantes de framing ---------------------------------------------------
+# --- Framing constants ---------------------------------------------------
 
-MAGIC = 0x5A  # 1er octet de toute trame
+MAGIC = 0x5A  # 1st byte of every frame
 HEADER_SIZE = 3  # magic + type + length
-ERROR_FLAG = 0x80  # bit positionné dans le champ "type" en cas d'erreur
+ERROR_FLAG = 0x80  # bit set in the "type" field on error
 
-#: Taille d'un rapport HID sur l'interface de contrôle (in comme out).
+#: Size of a HID report on the control interface (both in and out).
 REPORT_SIZE = 64
 
-#: Report ID utilisé dans ``wValue`` : 0x00 -> wValue = 0x0200.
+#: Report ID used in ``wValue``: 0x00 -> wValue = 0x0200.
 REPORT_ID = 0x00
 
-#: Report ID historique (wValue = 0x025A), conservé pour le repli de secours.
+#: Legacy report ID (wValue = 0x025A), kept for the fallback retry.
 LEGACY_REPORT_ID = 0x5A
 
-# Types de trames hôte -> carte
-CMD_SET = 0x26  # écriture d'un paramètre u16
-CMD_DIRECT_MODE = 0x39  # écriture / lecture du Direct Mode
-CMD_INFO = 0x09  # interrogation d'identité (firmware) - utilisé comme sonde
-CMD_SET_FLOAT = 0x12  # écriture d'un float32 (documenté, non utilisé)
+# Host -> card frame types
+CMD_SET = 0x26  # write a u16 parameter
+CMD_DIRECT_MODE = 0x39  # write / read Direct Mode
+CMD_INFO = 0x09  # identity query (firmware) - used as a probe
+CMD_SET_FLOAT = 0x12  # write a float32 (documented, unused)
 
-# Types de trames carte -> hôte
-NOTIF_ACK = 0x02  # accusé de réception d'une commande
-NOTIF_PARAMS = 0x11  # dump de paramètres (TLV float)
-NOTIF_STATE_CHANGED = 0x1A  # « un réglage a changé », émis en rafale après 0x39
+# Card -> host frame types
+NOTIF_ACK = 0x02  # command acknowledgment
+NOTIF_PARAMS = 0x11  # parameter dump (float TLV)
+NOTIF_STATE_CHANGED = 0x1A  # "a setting changed", emitted in a burst after 0x39
 
-# Marqueur d'une entrée TLV dans un dump de paramètres
+# Marker for a TLV entry in a parameter dump
 TLV_FLOAT = 0x96
 
-# Statuts d'ACK
+# ACK statuses
 STATUS_OK = 0x00
 
-# --- Identifiants de fonctionnalités ----------------------------------------
-# Scout Mode et Direct Mode sont confirmés par les captures. Les autres
-# fonctions (CrystalVoice, égaliseur) nécessitent une capture USB dédiée avant
-# de pouvoir être ajoutées ici (voir « Pistes non implémentées »).
+# --- Feature identifiers ----------------------------------------
+# Scout Mode and Direct Mode are confirmed by the captures. Other features
+# (CrystalVoice, equalizer) require a dedicated USB capture before they can
+# be added here (see "Not yet implemented").
 
 FEATURE_SCOUT = 0x07
 PARAM_SCOUT_ENABLED = 0x0002
 
-#: (feature, param) confirmés par l'analyse du pcap
+#: (feature, param) confirmed by pcap analysis
 SCOUT_MODE = (FEATURE_SCOUT, PARAM_SCOUT_ENABLED)
 
-# Direct Mode - identifiants extraits des captures USB
+# Direct Mode - identifiers extracted from the USB captures
 FEATURE_DIRECT_MODE = 0x00
 PARAM_DIRECT_MODE = 0x05
 
-# Mode sonore / égaliseur - identifiants de paramètres extraits des captures
-# « Sound Mode » (commande CMD_SET_FLOAT, type 0x12).
+# Sound mode / equalizer - parameter identifiers extracted from the "Sound
+# Mode" captures (CMD_SET_FLOAT command, type 0x12).
 PARAM_SBX_MASTER = 0x00  # SBX master (0/1)
-PARAM_MASTER_GAIN = 0x01  # gain/compensation master
-PARAM_EQ_ENABLED = 0x09  # égaliseur on/off (0/1)
-PARAM_PREAMP = 0x0A  # Préampli (gain d'entrée, en dB)
-EQ_BAND_PARAMS = tuple(range(0x0B, 0x15))  # les 10 bandes, en dB
+PARAM_MASTER_GAIN = 0x01  # master gain/compensation
+PARAM_EQ_ENABLED = 0x09  # equalizer on/off (0/1)
+PARAM_PREAMP = 0x0A  # Preamp (input gain, in dB)
+EQ_BAND_PARAMS = tuple(range(0x0B, 0x15))  # the 10 bands, in dB
 
-#: Préfixe constant observé dans toutes les écritures SET FLOAT.
+#: Constant prefix observed in every SET FLOAT write.
 SET_FLOAT_PREFIX = 0x01
 
-#: Payload de la requête d'état du Direct Mode (type 0x39).
+#: Payload of the Direct Mode status request (type 0x39).
 DIRECT_MODE_STATUS_PAYLOAD = b"\x01\x20\x00\x00\x00"
 
-#: Bit du 2e octet de payload de la réponse d'état indiquant « Direct Mode actif ».
+#: Bit of the status response's 2nd payload byte indicating "Direct Mode active".
 DIRECT_MODE_STATUS_BIT = 0x20
 
-#: Payload de la sonde d'identité (``5a 09 01 02``).
+#: Payload of the identity probe (``5a 09 01 02``).
 INFO_PROBE_PAYLOAD = b"\x02"
 
 
-# --- Structures de décodage --------------------------------------------------
+# --- Decoding structures --------------------------------------------------
 
 
 @dataclass(frozen=True)
 class ParamEntry:
-    """Une entrée TLV d'un dump de paramètres (type 0x11)."""
+    """A TLV entry from a parameter dump (type 0x11)."""
 
     kind: int  # normalement TLV_FLOAT (0x96)
     param_id: int
@@ -256,28 +253,28 @@ class ParamEntry:
     def as_int(self) -> int:
         return int.from_bytes(self.raw, "little")
 
-    def __str__(self) -> str:  # pragma: no cover - affichage debug
+    def __str__(self) -> str:  # pragma: no cover - debug display
         return f"0x{self.param_id:02x}={self.as_float:g} (raw={self.raw.hex()})"
 
 
 @dataclass(frozen=True)
 class Frame:
-    """Une trame décodée du protocole G8."""
+    """A decoded G8 protocol frame."""
 
     frame_type: int
     length: int
     payload: bytes
     raw: bytes
 
-    # --- Nature de la trame ---
+    # --- Frame nature ---
     @property
     def is_error(self) -> bool:
-        """Le bit 0x80 du champ type signale un rejet par la carte."""
+        """The 0x80 bit of the type field signals a rejection by the card."""
         return bool(self.frame_type & ERROR_FLAG)
 
     @property
     def base_type(self) -> int:
-        """Type de trame sans le bit d'erreur."""
+        """Frame type without the error bit."""
         return self.frame_type & ~ERROR_FLAG
 
     @property
@@ -292,7 +289,7 @@ class Frame:
     def is_state_changed(self) -> bool:
         return self.base_type == NOTIF_STATE_CHANGED
 
-    # --- Décodage d'un ACK (type 0x02) ---
+    # --- Decoding an ACK (type 0x02) ---
     @property
     def ack_command(self) -> Optional[int]:
         return self.payload[0] if len(self.payload) >= 1 else None
@@ -307,59 +304,59 @@ class Frame:
 
     @property
     def ack_feature(self) -> Optional[int]:
-        """Feature échoée - valable pour l'ACK de 0x26 uniquement."""
+        """Echoed feature - valid for the 0x26 ACK only."""
         return self.payload[2] if len(self.payload) >= 3 else None
 
     @property
     def ack_param(self) -> Optional[int]:
-        """Param u16 échoé - valable pour l'ACK de 0x26 uniquement."""
+        """Echoed u16 param - valid for the 0x26 ACK only."""
         if len(self.payload) < 5:
             return None
         return int.from_bytes(self.payload[3:5], "little")
 
     @property
     def ack_value(self) -> Optional[int]:
-        """Valeur échoée sur 2 octets - valable pour l'ACK de 0x26 uniquement."""
+        """Echoed 2-byte value - valid for the 0x26 ACK only."""
         if len(self.payload) < 7:
             return None
         return int.from_bytes(self.payload[5:7], "little")
 
-    # --- Décodage d'un ACK de commande 0x39 (layout différent de 0x26) ---
+    # --- Decoding a 0x39 command ACK (different layout from 0x26) ---
     @property
     def dm_ack_param(self) -> Optional[int]:
-        """Param échoé dans un ACK de 0x39 : ``5a 02 0a 39 00 [05] 00``."""
+        """Echoed param in a 0x39 ACK: ``5a 02 0a 39 00 [05] 00``."""
         return self.payload[2] if len(self.payload) >= 3 else None
 
     @property
     def dm_ack_value(self) -> Optional[int]:
-        """Valeur échoée dans un ACK de 0x39 : ``5a 02 0a 39 00 05 [00]``."""
+        """Echoed value in a 0x39 ACK: ``5a 02 0a 39 00 05 [00]``."""
         return self.payload[3] if len(self.payload) >= 4 else None
 
-    # --- Décodage d'une réponse d'état du Direct Mode (type 0x39) ---
+    # --- Decoding a Direct Mode status response (type 0x39) ---
     @property
     def direct_mode_enabled(self) -> Optional[bool]:
-        """État du Direct Mode dans une réponse ``5a 39 05 01 <bits> ...``."""
+        """Direct Mode state in a ``5a 39 05 01 <bits> ...`` response."""
         if self.base_type != CMD_DIRECT_MODE or len(self.payload) < 2:
             return None
         return bool(self.payload[1] & DIRECT_MODE_STATUS_BIT)
 
-    # --- Décodage d'un dump de paramètres (type 0x11) ---
+    # --- Decoding a parameter dump (type 0x11) ---
     @property
     def params(self) -> list[ParamEntry]:
         return parse_params(self.payload) if self.is_params else []
 
-    # --- Décodage d'une réponse d'info (type 0x09) ---
+    # --- Decoding an info response (type 0x09) ---
     @property
     def info_text(self) -> Optional[str]:
-        """Chaîne ASCII contenue dans une réponse 0x09 (version du firmware)."""
+        """ASCII string contained in a 0x09 response (firmware version)."""
         if self.base_type != CMD_INFO:
             return None
         printable = bytes(b for b in self.payload if 0x20 <= b < 0x7F)
         return printable.decode("ascii", "ignore") or None
 
     def describe(self) -> str:
-        """Résumé lisible, utilisé par l'outil de debug et les logs."""
-        flag = " [ERREUR]" if self.is_error else ""
+        """Human-readable summary, used by the debug tool and logs."""
+        flag = " [ERROR]" if self.is_error else ""
         if self.is_ack:
             if self.ack_command == CMD_DIRECT_MODE:
                 return (
@@ -393,7 +390,7 @@ class Frame:
 
 @dataclass
 class DecodedState:
-    """Cache d'état alimenté par les notifications reçues."""
+    """State cache fed by the received notifications."""
 
     params: dict[int, float] = field(default_factory=dict)
     features: dict[tuple[int, int], int] = field(default_factory=dict)
@@ -415,15 +412,15 @@ class DecodedState:
                 self.features[(feature, param)] = value
 
 
-# --- Encodage ----------------------------------------------------------------
+# --- Encoding ----------------------------------------------------------------
 
 
 def pad_report(frame: bytes, size: int = REPORT_SIZE) -> bytes:
-    """Complète une trame par des zéros jusqu'à la taille d'un rapport HID.
+    """Pads a frame with zeros up to the size of a HID report.
 
-    L'interface 4 n'a pas d'endpoint OUT : l'écriture part en SET_REPORT avec
-    ``wLength = 64``, la trame doit donc être zéro-paddée comme le fait
-    l'application officielle.
+    Interface 4 has no OUT endpoint: the write goes out as SET_REPORT with
+    ``wLength = 64``, so the frame must be zero-padded like the official
+    application does.
 
     >>> pad_report(b"\\x5a\\x39\\x03\\x00\\x05\\x01")[:6].hex()
     '5a3903000501'
@@ -431,25 +428,25 @@ def pad_report(frame: bytes, size: int = REPORT_SIZE) -> bytes:
     64
     """
     if len(frame) > size:
-        raise ValueError(f"trame trop longue pour un rapport de {size} octets: {len(frame)}")
+        raise ValueError(f"frame too long for a {size}-byte report: {len(frame)}")
     return bytes(frame) + bytes(size - len(frame))
 
 
 def build_frame(frame_type: int, payload: bytes) -> bytes:
-    """Construit une trame ``5a <type> <len> <payload>`` (sans padding).
+    """Builds a ``5a <type> <len> <payload>`` frame (unpadded).
 
-    Le padding à 64 octets et le préfixe de report ID sont ajoutés par la
-    couche transport (:meth:`driver.SoundBlasterG8Driver._send_raw`).
+    Padding to 64 bytes and the report-ID prefix are added by the transport
+    layer (:meth:`driver.SoundBlasterG8Driver._send_raw`).
     """
     if not 0 <= frame_type <= 0xFF:
-        raise ValueError(f"type de trame invalide: {frame_type}")
+        raise ValueError(f"invalid frame type: {frame_type}")
     if len(payload) > 0xFF:
-        raise ValueError(f"payload trop long: {len(payload)} octets")
+        raise ValueError(f"payload too long: {len(payload)} bytes")
     return bytes([MAGIC, frame_type, len(payload)]) + bytes(payload)
 
 
 def build_set_u16(feature: int, param: int, value: int) -> bytes:
-    """Construit une commande SET (type 0x26) avec une valeur sur 16 bits.
+    """Builds a SET command (type 0x26) with a 16-bit value.
 
     >>> build_set_u16(FEATURE_SCOUT, PARAM_SCOUT_ENABLED, 1).hex()
     '5a26050702000100'
@@ -459,12 +456,12 @@ def build_set_u16(feature: int, param: int, value: int) -> bytes:
 
 
 def build_set_bool(feature: int, param: int, enabled: bool) -> bytes:
-    """Commande SET d'un booléen (Scout Mode, etc.)."""
+    """SET command for a boolean (Scout Mode, etc.)."""
     return build_set_u16(feature, param, 1 if enabled else 0)
 
 
 def build_scout_mode(enabled: bool) -> bytes:
-    """Trame d'activation/désactivation du Scout Mode.
+    """Scout Mode on/off frame.
 
     >>> build_scout_mode(True).hex()
     '5a26050702000100'
@@ -475,7 +472,7 @@ def build_scout_mode(enabled: bool) -> bytes:
 
 
 def build_direct_mode(enabled: bool) -> bytes:
-    """Trame d'activation/désactivation du Direct Mode (non paddée).
+    """Direct Mode on/off frame (unpadded).
 
     >>> build_direct_mode(True).hex()
     '5a3903000501'
@@ -487,7 +484,7 @@ def build_direct_mode(enabled: bool) -> bytes:
 
 
 def build_set_float(param: int, value: float) -> bytes:
-    """Construit une commande SET FLOAT (type 0x12) - mode sonore / égaliseur.
+    """Builds a SET FLOAT command (type 0x12) - sound mode / equalizer.
 
     >>> build_set_float(PARAM_EQ_ENABLED, 1.0).hex()
     '5a12070196090000803f'
@@ -501,7 +498,7 @@ def build_set_float(param: int, value: float) -> bytes:
 
 
 def build_direct_mode_status() -> bytes:
-    """Trame de lecture de l'état du Direct Mode.
+    """Direct Mode status-read frame.
 
     >>> build_direct_mode_status().hex()
     '5a39050120000000'
@@ -510,7 +507,7 @@ def build_direct_mode_status() -> bytes:
 
 
 def build_info_probe() -> bytes:
-    """Trame d'interrogation d'identité, utilisée comme sonde après un reset.
+    """Identity query frame, used as a probe after a reset.
 
     >>> build_info_probe().hex()
     '5a090102'
@@ -518,22 +515,22 @@ def build_info_probe() -> bytes:
     return build_frame(CMD_INFO, INFO_PROBE_PAYLOAD)
 
 
-# --- Décodage ----------------------------------------------------------------
+# --- Decoding ----------------------------------------------------------------
 
 
 def parse_frame(data: bytes) -> Optional[Frame]:
-    """Décode une trame reçue. Retourne None si le buffer n'est pas exploitable.
+    """Decodes a received frame. Returns None if the buffer isn't usable.
 
-    Les rapports reçus sont toujours de 64 octets, complétés par des zéros :
-    le champ ``length`` sert donc à isoler le payload utile.
+    Received reports are always 64 bytes, zero-padded: the ``length`` field
+    is used to isolate the useful payload.
     """
     if not data:
         return None
 
     buf = bytes(data)
 
-    # Certains back-ends hidapi préfixent le report ID (0x00 quand les rapports
-    # ne sont pas numérotés) : on se resynchronise sur le magic 0x5A.
+    # Some hidapi backends prefix the report ID (0x00 when reports aren't
+    # numbered): resynchronize on the 0x5A magic byte.
     if buf[0] != MAGIC:
         idx = buf.find(bytes([MAGIC]))
         if idx == -1:
@@ -550,15 +547,15 @@ def parse_frame(data: bytes) -> Optional[Frame]:
 
 
 def parse_params(payload: bytes) -> list[ParamEntry]:
-    """Décode le payload d'un dump de paramètres (type 0x11)."""
+    """Decodes the payload of a parameter dump (type 0x11)."""
     if len(payload) < 2:
         return []
 
     count = int.from_bytes(payload[0:2], "little")
     entries: list[ParamEntry] = []
     offset = 2
-    # On borne par le buffer réellement disponible : le compteur annoncé n'est
-    # pas toujours cohérent avec la taille du rapport.
+    # Bounded by the buffer actually available: the announced count isn't
+    # always consistent with the report size.
     while len(entries) < count and offset + 6 <= len(payload):
         kind = payload[offset]
         param_id = payload[offset + 1]

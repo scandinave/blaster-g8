@@ -1,10 +1,10 @@
 """
-Module de contrôle pour la carte Sound Blaster G8.
+Control module for the Sound Blaster G8 card.
 
-Contient la logique métier et fait abstraction du driver. Toutes les méthodes
-``set_*`` retournent un booléen indiquant si le matériel a bien appliqué la
-commande : la GUI peut ainsi refuser de basculer un interrupteur quand la
-carte n'a pas répondu.
+Contains the business logic and abstracts away the driver. Every ``set_*``
+method returns a boolean indicating whether the hardware actually applied
+the command: the GUI can thus refuse to flip a switch when the card didn't
+respond.
 """
 
 from typing import Callable, Optional
@@ -13,36 +13,36 @@ from . import alsa_fix, protocol
 from .driver import PRODUCT_ID, VENDOR_ID, SoundBlasterG8Driver, get_driver
 from .sound_modes import DEFAULT_SOUND_MODE, SOUND_MODES
 
-#: Fonctions dont la trame USB a été identifiée et validée sur le matériel.
+#: Features whose USB frame has been identified and validated on hardware.
 SUPPORTED_FEATURES = frozenset({"scout_mode", "direct_mode", "sound_mode", "eq"})
 
-#: Poids « tilt » pour les sliders Basse/Aigus (bandes 0x0b..0x14, dans cet
-#: ordre). Ces deux sliders n'ont pas de paramètre dédié sur la carte : dans
-#: la capture ``Equalizer-manual.pcapng``, les bouger réécrit les 10 bandes
-#: existantes avec une courbe décroissante depuis une extrémité du spectre.
-#: Les poids ci-dessous sont les deltas mesurés dans cette capture, normalisés
-#: pour qu'un slider à +12 dB reproduise le geste capturé : c'est une
-#: **approximation** de l'algorithme réel de Creative, pas une valeur
-#: garantie identique.
+#: "Tilt" weights for the Bass/Treble sliders (bands 0x0b..0x14, in that
+#: order). These two sliders have no dedicated parameter on the card: in
+#: the ``Equalizer-manual.pcapng`` capture, moving them rewrites the 10
+#: existing bands with a curve decreasing from one end of the spectrum. The
+#: weights below are the deltas measured in that capture, normalized so a
+#: slider at +12 dB reproduces the captured gesture: this is an
+#: **approximation** of Creative's real algorithm, not a value guaranteed
+#: to be identical.
 BASS_TILT_WEIGHTS = (0.27061, 0.28224, 0.20667, 0.10533, 0.044, 0.012, 0.0, 0.0, 0.0, 0.0)
 TREBLE_TILT_WEIGHTS = (0.0, 0.0, 0.0, 0.00773, 0.02591, 0.04182, 0.09182, 0.19955, 0.34167, 0.35637)
 
 
 class SoundBlasterController:
-    """Contrôleur principal pour la carte Sound Blaster G8.
+    """Main controller for the Sound Blaster G8 card.
 
-    Sert d'intermédiaire entre l'interface GUI et le driver matériel.
+    Acts as an intermediary between the GUI and the hardware driver.
     """
 
-    MIN_EQ_VALUE = -12.0  # Plage EQ en dB
+    MIN_EQ_VALUE = -12.0  # EQ range in dB
     MAX_EQ_VALUE = 12.0
     NUM_BANDS = 10
 
     def __init__(self, driver: Optional[SoundBlasterG8Driver] = None):
-        """Initialise le contrôleur.
+        """Initializes the controller.
 
         Args:
-            driver: Optionnel - Un driver spécifique pour les tests unitaires.
+            driver: Optional - a specific driver for unit tests.
         """
         self._driver = driver if driver else get_driver()
         self._direct_mode = False
@@ -51,15 +51,14 @@ class SoundBlasterController:
         self._eq_bands: list[float] = [0.0] * self.NUM_BANDS
         self._eq_preamp: float = 0.0
         self._eq_enabled: bool = False
-        # Position persistante des sliders Basse/Aigus (voir set_eq_bass/
-        # set_eq_treble) : contrairement aux bandes, ce ne sont pas des
-        # paramètres de la carte mais une position UI dont on déduit un
-        # delta à chaque changement.
+        # Persistent position of the Bass/Treble sliders (see set_eq_bass/
+        # set_eq_treble): unlike bands, these aren't card parameters but a
+        # UI position from which a delta is derived on each change.
         self._eq_bass: float = 0.0
         self._eq_treble: float = 0.0
         self._sound_mode: str = DEFAULT_SOUND_MODE
 
-        # Listeners pour les événements (pour notification à la GUI)
+        # Listeners for events (to notify the GUI)
         self._listeners: dict[str, list[Callable]] = {
             "direct_mode_changed": [],
             "scout_mode_changed": [],
@@ -72,24 +71,25 @@ class SoundBlasterController:
             "eq_treble_changed": [],
             "sound_mode_changed": [],
             "command_failed": [],
-            # (bool) : True quand la carte se réénumère (bascule du Direct
-            # Mode), False quand la reconnexion est terminée.
+            # (bool): True when the card is re-enumerating (Direct Mode
+            # toggle), False when the reconnection is complete.
             "reconnecting": [],
         }
 
-        # Le driver signale les reconnexions : on les relaie tel quel.
+        # The driver signals reconnections: relay them as-is.
         self._driver.on_reconnecting = lambda active: self._notify("reconnecting", active)
 
     # ------------------------------------------------------------------
-    # Connectivité
+    # Connectivity
     # ------------------------------------------------------------------
 
     def connect(self) -> bool:
-        """Établit la connexion au matériel puis charge l'état connu.
+        """Establishes the hardware connection then loads the known state.
 
-        Réapplique aussi le correctif ALSA (source de capture micro, voir
-        :mod:`soundblaster_g8.alsa_fix`) : ce bug est indépendant du canal de
-        contrôle HID, donc traité même si la connexion HID échoue.
+        Also re-applies the ALSA fix (mic capture source, see
+        :mod:`soundblaster_g8.alsa_fix`): this bug is independent of the
+        HID control channel, so it's handled even if the HID connection
+        fails.
         """
         alsa_fix.ensure_microphone_source(VENDOR_ID, PRODUCT_ID)
         connected = self._driver.connect()
@@ -98,15 +98,15 @@ class SoundBlasterController:
         return connected
 
     def disconnect(self) -> None:
-        """Déconnecte du matériel."""
+        """Disconnects from the hardware."""
         self._driver.disconnect()
 
     def is_connected(self) -> bool:
-        """Vérifie la connexion au matériel réel."""
+        """Checks the connection to the real hardware."""
         return self._driver.is_connected()
 
     def is_simulated(self) -> bool:
-        """``True`` si aucun matériel n'a été détecté."""
+        """``True`` if no hardware was detected."""
         return self._driver.is_simulated()
 
     def get_debug_info(self) -> dict:
@@ -114,15 +114,15 @@ class SoundBlasterController:
 
     @staticmethod
     def is_feature_supported(name: str) -> bool:
-        """Indique si la trame USB de cette fonction est connue.
+        """Indicates whether this feature's USB frame is known.
 
-        Les fonctions non supportées n'ont pas encore été capturées : les
-        activer n'aurait aucun effet sur la carte.
+        Unsupported features haven't been captured yet: enabling them
+        would have no effect on the card.
         """
         return name in SUPPORTED_FEATURES
 
     def _load_current_state(self) -> None:
-        """Charge l'état connu depuis le driver (sans écraser par des None)."""
+        """Loads the known state from the driver (without overwriting with None)."""
         for name, getter in (
             ("_direct_mode", self._driver.get_direct_mode),
             ("_scout_mode", self._driver.get_scout_mode),
@@ -131,7 +131,7 @@ class SoundBlasterController:
             try:
                 value = getter()
             except Exception as exc:
-                print(f"[SoundBlasterController] Lecture de {name} impossible: {exc}")
+                print(f"[SoundBlasterController] Unable to read {name}: {exc}")
                 continue
             if value is not None:
                 setattr(self, name, bool(value))
@@ -139,7 +139,7 @@ class SoundBlasterController:
         try:
             bands = self._driver.eq_get_all_bands()
         except Exception as exc:
-            print(f"[SoundBlasterController] Lecture de l'EQ impossible: {exc}")
+            print(f"[SoundBlasterController] Unable to read the EQ: {exc}")
             bands = None
         if bands:
             self._eq_bands = list(bands)
@@ -147,22 +147,22 @@ class SoundBlasterController:
         try:
             preamp = self._driver.eq_get_preamp()
         except Exception as exc:
-            print(f"[SoundBlasterController] Lecture du Préampli impossible: {exc}")
+            print(f"[SoundBlasterController] Unable to read the Preamp: {exc}")
             preamp = None
         if preamp is not None:
             self._eq_preamp = preamp
 
-        print("[SoundBlasterController] État initial chargé")
+        print("[SoundBlasterController] Initial state loaded")
 
     # ------------------------------------------------------------------
-    # Scout Mode (supporté)
+    # Scout Mode (supported)
     # ------------------------------------------------------------------
 
     def set_scout_mode(self, enabled: bool) -> bool:
-        """Active/désactive le mode Scout.
+        """Enables/disables Scout Mode.
 
         Returns:
-            ``True`` si la carte a confirmé la commande.
+            ``True`` if the card confirmed the command.
         """
         ok = bool(self._driver.set_scout_mode(enabled))
         if ok:
@@ -173,25 +173,26 @@ class SoundBlasterController:
         return ok
 
     def get_scout_mode(self) -> bool:
-        """Retourne l'état connu du mode Scout."""
+        """Returns Scout Mode's known state."""
         state = self._driver.get_scout_mode()
         if state is not None:
             self._scout_mode = state
         return self._scout_mode
 
     # ------------------------------------------------------------------
-    # Direct Mode (supporté)
+    # Direct Mode (supported)
     # ------------------------------------------------------------------
 
     def set_direct_mode(self, enabled: bool) -> bool:
-        """Active/désactive le Direct Mode.
+        """Enables/disables Direct Mode.
 
-        La bascule provoque un reset USB de la carte : l'appel peut durer
-        plusieurs secondes (l'événement ``reconnecting`` encadre l'attente) et
-        ne doit donc pas être fait depuis le thread de l'interface graphique.
+        The toggle triggers a USB reset of the card: the call can take
+        several seconds (the ``reconnecting`` event brackets the wait) and
+        must therefore not be made from the GUI thread.
 
         Returns:
-            ``True`` si la carte a acquitté la commande **et** a été rouverte.
+            ``True`` if the card acknowledged the command **and** was
+            reopened.
         """
         ok = bool(self._driver.set_direct_mode(enabled))
         if not ok:
@@ -199,13 +200,13 @@ class SoundBlasterController:
             return False
 
         self._direct_mode = enabled
-        # Le reset USB peut avoir remis d'autres réglages à leur valeur par
-        # défaut : on relit l'état matériel et on re-notifie.
+        # The USB reset may have reset other settings to their default
+        # value: re-read the hardware state and re-notify.
         self._resync_after_toggle()
         return True
 
     def _resync_after_toggle(self) -> None:
-        """Relit l'état matériel après un reset USB et re-notifie la GUI."""
+        """Re-reads the hardware state after a USB reset and re-notifies the GUI."""
         direct = self._driver.get_direct_mode()
         if direct is not None:
             self._direct_mode = bool(direct)
@@ -217,43 +218,42 @@ class SoundBlasterController:
         self._notify("scout_mode_changed", self._scout_mode)
 
     def get_direct_mode(self) -> bool:
-        """Interroge la carte (et non le cache local) sur l'état du Direct Mode."""
+        """Queries the card (not the local cache) for Direct Mode's state."""
         state = self._driver.get_direct_mode()
         if state is not None:
             self._direct_mode = bool(state)
         return self._direct_mode
 
     # ------------------------------------------------------------------
-    # Mode sonore (supporté)
+    # Sound mode (supported)
     # ------------------------------------------------------------------
 
     def list_sound_modes(self) -> list[tuple[str, str]]:
-        """Liste ``(slug, label)`` des modes sonores disponibles.
+        """``(slug, label)`` list of the available sound modes.
 
-        Ordre : mode par défaut (``Désactivé``) en premier, puis ordre
-        alphabétique des labels (ordre déjà utilisé par
-        :mod:`soundblaster_g8.sound_modes`).
+        Order: default mode (``Disabled``) first, then alphabetical order
+        of labels (order already used by :mod:`soundblaster_g8.sound_modes`).
         """
         return [(mode.slug, mode.label) for mode in SOUND_MODES.values()]
 
     def get_sound_mode(self) -> str:
-        """Retourne le slug du mode sonore actif (état local uniquement).
+        """Returns the active sound mode's slug (local state only).
 
-        Aucune trame de lecture du mode actif n'a été identifiée dans les
-        captures (comme pour le Scout Mode) : l'état suit simplement la
-        dernière commande envoyée avec succès.
+        No read frame for the active mode has been identified in the
+        captures (same as for Scout Mode): the state simply tracks the
+        last successfully sent command.
         """
         return self._sound_mode
 
     def set_sound_mode(self, slug: str) -> bool:
-        """Applique un mode sonore (égaliseur + acoustic engine).
+        """Applies a sound mode (equalizer + acoustic engine).
 
         Returns:
-            ``True`` si la carte a acquitté toutes les trames de la séquence.
+            ``True`` if the card acknowledged every frame in the sequence.
         """
         mode = SOUND_MODES.get(slug)
         if mode is None:
-            raise ValueError(f"Mode sonore inconnu: {slug}")
+            raise ValueError(f"Unknown sound mode: {slug}")
 
         ok = bool(self._driver.set_sound_mode(list(mode.writes)))
         if ok:
@@ -261,9 +261,9 @@ class SoundBlasterController:
             self._eq_bands = list(mode.bands)
             self._eq_preamp = mode.preamp
             self._eq_enabled = mode.eq_enabled
-            # Un nouveau mode remplace intégralement les bandes : l'ancienne
-            # position de Basse/Aigus (delta depuis une base qui n'existe
-            # plus) n'a plus de sens.
+            # A new mode fully replaces the bands: the old Bass/Treble
+            # position (a delta from a base that no longer exists) no
+            # longer makes sense.
             self._eq_bass = 0.0
             self._eq_treble = 0.0
             self._notify("sound_mode_changed", slug)
@@ -277,7 +277,7 @@ class SoundBlasterController:
         return ok
 
     # ------------------------------------------------------------------
-    # Fonctions non encore reversées
+    # Not yet reverse-engineered functions
     # ------------------------------------------------------------------
 
     def set_crystalvoice(self, enabled: bool) -> bool:
@@ -293,23 +293,23 @@ class SoundBlasterController:
         return self._crystalvoice
 
     # ------------------------------------------------------------------
-    # EQ 10 bandes (état local uniquement pour l'instant)
+    # 10-band EQ (local state only for now)
     # ------------------------------------------------------------------
 
     def set_eq_band(self, index: int, value: float) -> bool:
-        """Règle une bande d'égaliseur avec validation.
+        """Sets an equalizer band, with validation.
 
         Args:
-            index: Index de la bande (0-9)
-            value: Valeur en dB (-12 à +12)
+            index: Band index (0-9)
+            value: Value in dB (-12 to +12)
         """
         if not 0 <= index < self.NUM_BANDS:
-            raise ValueError(f"Index de bande invalide: {index}")
+            raise ValueError(f"Invalid band index: {index}")
 
         clamped = max(self.MIN_EQ_VALUE, min(self.MAX_EQ_VALUE, value))
         ok = bool(self._driver.eq_set_band(index, clamped))
-        # L'état local suit le curseur même si le matériel ne l'applique pas
-        # encore, afin de garder une GUI cohérente.
+        # Local state follows the slider even if the hardware hasn't
+        # applied it yet, to keep the GUI consistent.
         self._eq_bands[index] = clamped
         self._notify("eq_band_changed", index, clamped)
         if not ok:
@@ -318,14 +318,14 @@ class SoundBlasterController:
 
     def get_eq_band(self, index: int) -> float:
         if not 0 <= index < self.NUM_BANDS:
-            raise ValueError(f"Index de bande invalide: {index}")
+            raise ValueError(f"Invalid band index: {index}")
         return self._eq_bands[index]
 
     def get_eq_all_bands(self) -> list[float]:
         return self._eq_bands.copy()
 
     def set_eq_preamp(self, value: float) -> bool:
-        """Règle le Préampli, avec la même validation que :meth:`set_eq_band`."""
+        """Sets the Preamp, with the same validation as :meth:`set_eq_band`."""
         clamped = max(self.MIN_EQ_VALUE, min(self.MAX_EQ_VALUE, value))
         ok = bool(self._driver.eq_set_preamp(clamped))
         self._eq_preamp = clamped
@@ -338,16 +338,15 @@ class SoundBlasterController:
         return self._eq_preamp
 
     def prepare_eq_page(self) -> bool:
-        """Prépare l'égaliseur pour l'édition manuelle : l'active si besoin.
+        """Prepares the equalizer for manual editing: enables it if needed.
 
-        Comportement de l'app Creative native à l'ouverture de l'onglet
-        Équaliseur : si aucun égaliseur n'est déjà actif (mode « Désactivé »),
-        applique un égaliseur **plat** (10 bandes + Préampli à 0 dB) et
-        l'active, plutôt que de se contenter de positionner le bit
-        ``param 0x09`` en laissant les bandes intactes - sans quoi les
-        écritures de bandes sont bien acquittées par la carte mais restent
-        inaudibles tant que le maître EQ est coupé. Si un mode est déjà actif
-        (donc déjà audible), ne touche à rien.
+        Native Creative app behavior when opening the Equalizer tab: if no
+        equalizer is already active (mode "Disabled"), applies a **flat**
+        equalizer (10 bands + Preamp at 0 dB) and enables it, rather than
+        just setting the ``param 0x09`` bit while leaving the bands
+        untouched - otherwise band writes are acknowledged by the card but
+        remain inaudible while the EQ master is off. If a mode is already
+        active (and thus already audible), does nothing.
         """
         if self._eq_enabled:
             return True
@@ -373,10 +372,10 @@ class SoundBlasterController:
         return ok
 
     def set_eq_bass(self, value: float) -> bool:
-        """Règle la position du slider Basse (approximatif, persistant).
+        """Sets the Bass slider's position (approximate, persistent).
 
-        Voir ``BASS_TILT_WEIGHTS`` : ``value`` est une position absolue
-        (-12..12 dB, même plage que les bandes), pas un delta.
+        See ``BASS_TILT_WEIGHTS``: ``value`` is an absolute position
+        (-12..12 dB, same range as the bands), not a delta.
         """
         return self._set_tilt_slider("_eq_bass", "eq_bass_changed", BASS_TILT_WEIGHTS, value)
 
@@ -384,7 +383,7 @@ class SoundBlasterController:
         return self._eq_bass
 
     def set_eq_treble(self, value: float) -> bool:
-        """Règle la position du slider Aigus (approximatif, persistant)."""
+        """Sets the Treble slider's position (approximate, persistent)."""
         return self._set_tilt_slider(
             "_eq_treble", "eq_treble_changed", TREBLE_TILT_WEIGHTS, value
         )
@@ -395,15 +394,15 @@ class SoundBlasterController:
     def _set_tilt_slider(
         self, attr: str, event: str, weights: tuple[float, ...], value: float,
     ) -> bool:
-        """Applique un déplacement de slider Basse/Aigus sur les 10 bandes.
+        """Applies a Bass/Treble slider move across the 10 bands.
 
-        Approximation dérivée de ``Equalizer-manual.pcapng`` (voir
-        ``BASS_TILT_WEIGHTS``/``TREBLE_TILT_WEIGHTS``) : contrairement à une
-        bande ou au Préampli, il n'y a pas de paramètre dédié sur la carte -
-        seul le **delta** depuis la position précédente du slider est
-        pondéré par bande et ajouté à l'état actuel, ce qui permet au slider
-        de rester où l'utilisateur l'a posé (un aller-retour annule
-        exactement son propre effet).
+        Approximation derived from ``Equalizer-manual.pcapng`` (see
+        ``BASS_TILT_WEIGHTS``/``TREBLE_TILT_WEIGHTS``): unlike a band or
+        the Preamp, there's no dedicated parameter on the card - only the
+        **delta** from the slider's previous position is weighted per band
+        and added to the current state, which lets the slider stay
+        wherever the user left it (a round trip exactly cancels its own
+        effect).
         """
         clamped = max(self.MIN_EQ_VALUE, min(self.MAX_EQ_VALUE, value))
         delta = clamped - getattr(self, attr)
@@ -428,9 +427,9 @@ class SoundBlasterController:
         return all_ok
 
     def load_preset(self, preset_name: str) -> bool:
-        """Charge un preset prédéfini.
+        """Loads a predefined preset.
 
-        Presets disponibles: flat, bass_boost, vocal, gaming, movie.
+        Available presets: flat, bass_boost, vocal, gaming, movie.
         """
         presets = {
             "flat": [0.0] * self.NUM_BANDS,
@@ -441,7 +440,7 @@ class SoundBlasterController:
         }
 
         if preset_name not in presets:
-            raise ValueError(f"Preset inconnu: {preset_name}")
+            raise ValueError(f"Unknown preset: {preset_name}")
 
         all_ok = True
         for i, value in enumerate(presets[preset_name]):
@@ -452,11 +451,11 @@ class SoundBlasterController:
         return all_ok
 
     def save_preset(self, preset_name: str) -> bool:
-        """Sauvegarde l'état actuel de l'égaliseur sur la carte."""
+        """Saves the equalizer's current state to the card."""
         return bool(self._driver.eq_save_preset(preset_name))
 
     # ------------------------------------------------------------------
-    # Listeners / événements
+    # Listeners / events
     # ------------------------------------------------------------------
 
     def add_listener(self, event: str, callback: Callable) -> None:
@@ -472,7 +471,7 @@ class SoundBlasterController:
             try:
                 callback(*args)
             except Exception as exc:
-                print(f"[SoundBlasterController] Erreur dans le listener {event}: {exc}")
+                print(f"[SoundBlasterController] Error in listener {event}: {exc}")
 
 
 # Singleton controller
@@ -480,7 +479,7 @@ _controller_instance: Optional[SoundBlasterController] = None
 
 
 def get_controller() -> SoundBlasterController:
-    """Retourne l'instance singleton du contrôleur."""
+    """Returns the controller's singleton instance."""
     global _controller_instance
     if _controller_instance is None:
         _controller_instance = SoundBlasterController()

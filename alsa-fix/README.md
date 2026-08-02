@@ -1,43 +1,43 @@
 # Sound Blaster G8 — ALSA Fix
 
-Correctif automatique pour le microphone (« External Mic ») qui ne fonctionne pas
-au démarrage sur Linux.
+Automatic fix for the microphone ("External Mic") not working on Linux at
+startup.
 
-Le pilote noyau `snd-usb-audio` n'initialise pas la bonne source de capture par
-défaut pour la G8 : le contrôle ALSA « PCM Capture Source » démarre sur `Line In`
-au lieu de `External Mic`. Le micro ne fonctionne donc pas tant qu'on n'a pas
-changé la source manuellement (alsamixer/pavucontrol), à chaque redémarrage.
+The `snd-usb-audio` kernel driver doesn't initialize the correct default
+capture source for the G8: the ALSA "PCM Capture Source" control starts on
+`Line In` instead of `External Mic`. The microphone therefore doesn't work
+until the source is changed manually (alsamixer/pavucontrol), on every
+restart of the card.
 
-Même bug, même correctif que sur la [SoundBlasterX G6](../../linuxblaster_control/alsa-fix)
-(même puce/même layout de contrôles ALSA) — ce dossier en est un portage.
+Same bug, same fix as on the [SoundBlasterX G6](../../linuxblaster_control/alsa-fix)
+(same chip/same ALSA control layout) — this folder is a port of it.
 
-## Le correctif
+## The fix
 
-Une règle udev détecte l'apparition de la carte ALSA de la G8 et lance
-automatiquement un petit script qui sélectionne `External Mic` comme source de
-capture (`PCM Capture Source`).
+A udev rule detects the G8's ALSA card appearing and automatically runs a
+small script that selects `External Mic` as the capture source
+(`PCM Capture Source`).
 
-Fonctionne sur n'importe quelle distro. Seul `alsa-utils` (`amixer`) est requis,
-déjà installé sur pratiquement tous les systèmes Linux avec du son.
+Works on any distro. Only `alsa-utils` (`amixer`) is required, already
+installed on virtually every Linux system with sound.
 
-Contrairement au script de la G6, celui-ci **ne coupe pas** les autres entrées de
-capture (Line In / S/PDIF In / What U Hear) : il se contente de sélectionner la
-bonne source.
+Unlike the G6 script, this one **doesn't mute** the other capture inputs
+(Line In / S/PDIF In / What U Hear): it just selects the correct source.
 
-Deux différences volontaires avec le script de la G6, pour plus de robustesse :
+Two deliberate differences from the G6 script, for extra robustness:
 
-1. **Découverte de la carte** : lecture de `/proc/asound/card*/usbid` (fourni par
-   le noyau, jamais localisé) plutôt que de parser la sortie de `aplay -l`, qui
-   est localisée (`carte 1 : ...` en français au lieu de `card 1: ...`) — le
-   script G6 casse silencieusement sur toute machine non anglophone.
-2. **Ciblage du contrôle** : par nom (`amixer sset 'PCM Capture Source'
-   'External Mic'`) plutôt que par `numid` (`cset numid=29 ...`), qui peut se
-   renuméroter d'une version de pilote/noyau à l'autre.
+1. **Card discovery**: reads `/proc/asound/card*/usbid` (provided by the
+   kernel, never localized) rather than parsing `aplay -l`'s output, which
+   is localized (`carte 1 : ...` in French instead of `card 1: ...`) — the
+   G6 script breaks silently on any non-English-speaking machine.
+2. **Control targeting**: by name (`amixer sset 'PCM Capture Source'
+   'External Mic'`) rather than by `numid` (`cset numid=29 ...`), which can
+   be renumbered between driver/kernel versions.
 
-L'application `soundblaster_g8` (GUI) réapplique aussi ce correctif à chaque
-démarrage (`soundblaster_g8/alsa_fix.py`), indépendamment de ce dossier — les deux
-mécanismes sont redondants par sécurité : celui-ci fonctionne même si l'app n'est
-jamais lancée.
+The `soundblaster_g8` application (GUI) also re-applies this fix on every
+startup (`soundblaster_g8/alsa_fix.py`), independently of this folder — the
+two mechanisms are redundant for safety: this one works even if the app is
+never launched.
 
 ## Installation
 
@@ -45,25 +45,25 @@ jamais lancée.
 sudo ./install.sh
 ```
 
-Rebranchez la carte (ou déclenchez `sudo udevadm trigger --subsystem-match=sound`)
-et le micro fonctionne.
+Replug the card (or trigger `sudo udevadm trigger --subsystem-match=sound`)
+and the microphone works.
 
-## Désinstallation
+## Uninstallation
 
 ```bash
 sudo ./install.sh --uninstall
 ```
 
-## Fonctionnement
+## How it works
 
 ```
-G8 branchée
-  → le noyau charge snd-usb-audio
-    → ALSA enregistre la carte son
-      → udev voit l'évènement SUBSYSTEM=="sound" avec l'ID USB de la G8
-        → lance le script de correctif
-          → amixer sélectionne "External Mic" comme source de capture
+G8 plugged in
+  → the kernel loads snd-usb-audio
+    → ALSA registers the sound card
+      → udev sees the SUBSYSTEM=="sound" event with the G8's USB ID
+        → runs the fix script
+          → amixer selects "External Mic" as the capture source
 ```
 
-Aucun service, aucun démon, aucun polling. Juste un script one-shot déclenché par
-la détection matérielle.
+No service, no daemon, no polling. Just a one-shot script triggered by
+hardware detection.

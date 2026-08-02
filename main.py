@@ -1,6 +1,6 @@
 """
-Point d'entrée pour l'application Sound Blaster G8 Control.
-Lance l'interface GUI avec Tkinter.
+Entry point for the Sound Blaster G8 Control application.
+Launches the Tkinter GUI.
 """
 
 import sys
@@ -9,21 +9,22 @@ import tkinter as tk
 
 
 def main():
-    """Fonction principale qui lance l'application."""
+    """Main function that launches the application."""
     from soundblaster_g8.gui import MainWindow
+    from soundblaster_g8.gui import i18n
 
     app = MainWindow()
 
-    # Configurer la fermeture propre de l'application
+    # Set up clean application shutdown
     def on_closing():
-        """Gère la fermeture de l'application."""
-        if messagebox.askokcancel("Quitter", "Voulez-vous quitter l'application ?"):
+        """Handles application shutdown."""
+        if messagebox.askokcancel(i18n._("Quit"), i18n._("Do you want to quit the application?")):
             app.destroy()
             sys.exit(0)
 
     app.protocol("WM_DELETE_WINDOW", on_closing)
 
-    # Lancer la boucle principale
+    # Run the main loop
     app.mainloop()
 
 

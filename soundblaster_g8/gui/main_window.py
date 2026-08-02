@@ -1,16 +1,16 @@
 """
-MainWindow pour l'application de contrôle Sound Blaster G8.
-Interface Tkinter thème sombre (voir ``theme.py``/``widgets.py``), conforme
-au mockup de design « Sound Blaster G8.dc.html » (photo produit, badges
-d'icônes, sélecteur de mode sonore façon « split button »).
+MainWindow for the Sound Blaster G8 control application.
+Dark-themed Tkinter interface (see ``theme.py``/``widgets.py``), matching the
+"Sound Blaster G8.dc.html" design mockup (product photo, icon badges, "split
+button" style sound-mode selector).
 
-Les commandes matérielles sont exécutées dans un thread de travail : une
-bascule du Direct Mode provoque un reset USB de la carte et prend 2 à 4
-secondes, ce qui gèlerait la fenêtre si elle était faite dans le callback Tk.
-Le résultat est rapatrié dans le thread graphique via ``self.after(0, ...)``.
+Hardware commands run in a worker thread: toggling Direct Mode triggers a USB
+reset on the card and takes 2 to 4 seconds, which would freeze the window if
+done in the Tk callback. The result is brought back to the GUI thread via
+``self.after(0, ...)``.
 
-La fenêtre contient deux « pages » (page principale / page Égaliseur) dans un
-même conteneur, une seule visible à la fois (pas de fenêtre flottante) : voir
+The window holds two "pages" (main page / Equalizer page) in the same
+container, only one packed at a time (no floating window): see
 ``_show_main_page``/``_show_eq_page``.
 """
 
@@ -20,53 +20,68 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from ..controller import SoundBlasterController
-from . import theme, widgets
+from . import i18n, theme, widgets
 from .eq_panel import EQPanel
 
 MIN_WINDOW_WIDTH = 640
 ASSETS_DIR = Path(__file__).parent / "assets"
 
+#: (feature key, icon glyph, title msgid, subtitle msgid) for the three
+#: toggle rows on the main page.
+TOGGLE_DEFS = [
+    ("direct_mode", "direct", "Direct Mode", "No signal processing"),
+    ("scout_mode", "scout", "Scout Mode", "In-game sound detection"),
+    ("crystalvoice", "voice", "CrystalVoice", "In-game voice optimization"),
+]
+
 
 class MainWindow(tk.Tk):
-    """Fenêtre principale de l'application Sound Blaster G8."""
+    """Main window of the Sound Blaster G8 application."""
 
     def __init__(self):
-        """Initialise la fenêtre principale."""
+        """Initializes the main window."""
         super().__init__()
 
-        self.title("Sound Blaster G8 - Control")
+        i18n.load_saved_language()
+
+        self.title(i18n._("Sound Blaster G8 - Control"))
         self.resizable(True, True)
 
         # Controller singleton
         self._controller: Optional[SoundBlasterController] = None
 
-        # État des toggles
+        # Toggle state
         self._direct_mode_var = tk.BooleanVar(value=False)
         self._scout_mode_var = tk.BooleanVar(value=False)
         self._crystalvoice_var = tk.BooleanVar(value=False)
 
-        # Mode sonore : listes parallèles (slugs/labels) pilotant le SplitSelect.
+        # Sound mode: parallel lists (slugs/labels) driving the SplitSelect.
         self._sound_mode_slugs: list[str] = []
         self._sound_mode_labels: list[str] = []
 
-        # Interrupteurs indisponibles (fonction non reversée) : ils ne doivent
-        # pas être réactivés à la fin d'une commande.
+        # Unavailable switches (feature not yet reverse-engineered): must
+        # not be re-enabled at the end of a command.
         self._unavailable: set[str] = set()
         self._switches: dict[str, widgets.ToggleSwitch] = {}
         self._toggle_rows: dict[str, dict] = {}
         self._eq_enabled = True
 
-        # Configuration de la fenêtre
+        # Last status message shown, as (msgid_template, kwargs), so it can
+        # be re-rendered in place when the language changes.
+        self._last_status: tuple[str, dict] = ("Ready", {})
+
+        # Window setup
         self._setup_ui()
 
     def _setup_ui(self):
-        """Configure l'interface utilisateur : en-tête, pages, barre de statut."""
+        """Sets up the UI: header, pages, status bar."""
         theme.apply_theme(self)
 
         self._setup_header()
+        i18n.add_listener(self._retranslate)
 
-        # Conteneur des pages : main_page et eq_page sont frères, une seule
-        # est empaquetée à la fois (voir _show_main_page/_show_eq_page).
+        # Pages container: main_page and eq_page are siblings, only one is
+        # packed at a time (see _show_main_page/_show_eq_page).
         self._pages_container = tk.Frame(self, bg=theme.BG_WINDOW)
         self._pages_container.pack(expand=True, fill=tk.BOTH)
 
@@ -74,16 +89,16 @@ class MainWindow(tk.Tk):
         self._eq_page = tk.Frame(self._pages_container, bg=theme.BG_WINDOW)
 
         self._setup_main_page(self._main_page)
-        # L'EQPanel a besoin du contrôleur : construit dans _init_controller.
+        # EQPanel needs the controller: built in _init_controller.
         self._eq_panel: Optional[EQPanel] = None
 
-        # Status bar (partagée entre les deux pages)
+        # Status bar (shared between both pages)
         status_bar = tk.Frame(self, bg=theme.BG_WINDOW)
         status_bar.pack(fill=tk.X, side=tk.BOTTOM)
 
         self._status_label = tk.Label(
             status_bar,
-            text="Prêt",
+            text="",
             anchor=tk.W,
             bg=theme.BG_WINDOW,
             fg=theme.FG_STATUSBAR,
@@ -92,26 +107,27 @@ class MainWindow(tk.Tk):
             pady=10,
         )
         self._status_label.pack(expand=True, fill=tk.X)
+        self._render_status()
 
         divider = tk.Frame(self, bg=theme.BORDER_CARD, height=1)
         divider.pack(fill=tk.X, side=tk.BOTTOM)
 
         self._show_main_page()
 
-        # Initialisation du controller
+        # Controller initialization
         self._init_controller()
 
         self._fit_window_to_page()
 
     def _setup_header(self):
-        """En-tête commun : bouton retour (masqué sur la page principale) + titre."""
+        """Shared header: back button (hidden on the main page) + title + language selector."""
         header = tk.Frame(self, bg=theme.BG_WINDOW, height=64)
         header.pack(fill=tk.X)
         header.pack_propagate(False)
 
         self._back_button = widgets.RoundedButton(
             header,
-            text="←  Retour",
+            text=i18n._("←  Back"),
             command=self._show_main_page,
             bg=theme.BG_WINDOW,
             fill=theme.BG_CONTROL,
@@ -120,20 +136,36 @@ class MainWindow(tk.Tk):
             padx=16,
             pady=8,
         )
-        # Placé/masqué dynamiquement par _show_main_page/_show_eq_page.
+        # Placed/hidden dynamically by _show_main_page/_show_eq_page.
 
         self._title_label = tk.Label(
             header,
-            text="Sound Blaster G8",
+            text=i18n._("Sound Blaster G8"),
             bg=theme.BG_WINDOW,
             fg=theme.FG_PRIMARY,
             font=theme.FONT_TITLE,
         )
         self._title_label.place(relx=0.5, rely=0.5, anchor="center")
+
+        # Language selector: option list built from whatever locales are
+        # actually discovered under soundblaster_g8/locale/ (see
+        # i18n.available_languages) - not hardcoded, so a new compiled
+        # locale shows up here automatically on the next launch.
+        languages = i18n.available_languages()
+        self._lang_codes = [code for code, _name in languages]
+        lang_names = [name for _code, name in languages]
+        self._lang_select = widgets.SplitSelect(
+            header, values=lang_names, command=self._on_language_change,
+            bg=theme.BG_WINDOW, width=90, font=theme.FONT_SMALL,
+        )
+        self._lang_select.place(relx=1.0, rely=0.5, anchor="e", x=-16)
+        if i18n.get_language() in self._lang_codes:
+            self._lang_select.set_index(self._lang_codes.index(i18n.get_language()))
+
         self._header_frame = header
 
     def _setup_main_page(self, controls_frame_parent):
-        """Construit le contenu de la page principale : photo produit + grille 2 colonnes."""
+        """Builds the main page content: product photo + 2-column grid."""
         outer = tk.Frame(controls_frame_parent, bg=theme.BG_WINDOW)
         outer.pack(expand=True, fill=tk.BOTH, padx=32, pady=(20, 24))
 
@@ -149,18 +181,20 @@ class MainWindow(tk.Tk):
         left.grid(row=0, column=0, sticky="new", padx=(0, 12))
         right.grid(row=0, column=1, sticky="new", padx=(12, 0))
 
-        self._toggle_rows["direct_mode"] = self._build_toggle_row(
-            left, "direct", "Direct Mode", "Sans traitement du signal",
-            self._direct_mode_var, self._on_direct_mode_change,
-        )
-        self._toggle_rows["scout_mode"] = self._build_toggle_row(
-            left, "scout", "Scout Mode", "Détection des sons dans le jeu",
-            self._scout_mode_var, self._on_scout_mode_change,
-        )
-        self._toggle_rows["crystalvoice"] = self._build_toggle_row(
-            left, "voice", "CrystalVoice", "Optimisation de la voix en jeu",
-            self._crystalvoice_var, self._on_crystalvoice_change,
-        )
+        for key, icon, title_msgid, subtitle_msgid in TOGGLE_DEFS:
+            var = {
+                "direct_mode": self._direct_mode_var,
+                "scout_mode": self._scout_mode_var,
+                "crystalvoice": self._crystalvoice_var,
+            }[key]
+            handler = {
+                "direct_mode": self._on_direct_mode_change,
+                "scout_mode": self._on_scout_mode_change,
+                "crystalvoice": self._on_crystalvoice_change,
+            }[key]
+            self._toggle_rows[key] = self._build_toggle_row(
+                left, icon, title_msgid, subtitle_msgid, var, handler,
+            )
 
         self._direct_toggle_switch = self._toggle_rows["direct_mode"]["switch"]
         self._scout_toggle_switch = self._toggle_rows["scout_mode"]["switch"]
@@ -170,18 +204,18 @@ class MainWindow(tk.Tk):
         self._build_equalizer_row(right)
 
     def _build_photo_header(self, parent):
-        """Affiche la photo produit (coins arrondis) en tête de la page principale."""
+        """Shows the product photo (rounded corners) at the top of the main page."""
         photo_path = ASSETS_DIR / "g8_photo.png"
         if not photo_path.exists():
             return
-        # Référence conservée sur self : sinon le PhotoImage est ramassé par le GC.
+        # Reference kept on self: otherwise the PhotoImage gets garbage-collected.
         self._g8_photo_image = tk.PhotoImage(file=str(photo_path))
         tk.Label(
             parent, image=self._g8_photo_image, bg=theme.BG_WINDOW, bd=0, highlightthickness=0,
         ).pack(pady=(0, 24))
 
     def _build_row_icon_text(self, parent, icon: str, title: str, subtitle: str, subtitle_wrap: int = 280):
-        """Construit une ligne badge d'icône + titre/sous-titre. Retourne (row, badge, title, subtitle)."""
+        """Builds an icon-badge + title/subtitle row. Returns (row, badge, title, subtitle)."""
         row = tk.Frame(parent, bg=theme.BG_WINDOW)
         row.pack(fill=tk.X, pady=(0, 36))
 
@@ -212,22 +246,28 @@ class MainWindow(tk.Tk):
         self,
         parent,
         icon: str,
-        title: str,
-        subtitle: str,
+        title_msgid: str,
+        subtitle_msgid: str,
         variable: tk.BooleanVar,
         on_change: Callable[[], None],
     ) -> dict:
-        """Construit une ligne badge + label/sous-titre + interrupteur à bascule."""
-        row, badge, title_label, subtitle_label = self._build_row_icon_text(parent, icon, title, subtitle)
+        """Builds a badge + title/subtitle + toggle-switch row."""
+        row, badge, title_label, subtitle_label = self._build_row_icon_text(
+            parent, icon, i18n._(title_msgid), i18n._(subtitle_msgid),
+        )
         switch = widgets.ToggleSwitch(row, variable=variable, command=on_change, bg=theme.BG_WINDOW)
         switch.pack(side=tk.RIGHT, anchor="n", padx=(16, 0))
-        return {"badge": badge, "title": title_label, "subtitle": subtitle_label, "switch": switch}
+        return {
+            "badge": badge, "title": title_label, "subtitle": subtitle_label, "switch": switch,
+            "title_msgid": title_msgid, "subtitle_msgid": subtitle_msgid,
+        }
 
     def _build_sound_mode_row(self, parent):
-        """Bloc « Mode Sonore » : badge + label, sélecteur « split button » à droite."""
-        row, _badge, _title, subtitle_label = self._build_row_icon_text(
-            parent, "equalizer", "Mode Sonore", "Égaliseur et acoustic engine", subtitle_wrap=200,
+        """"Sound Mode" block: badge + label, "split button" selector on the right."""
+        row, _badge, title_label, subtitle_label = self._build_row_icon_text(
+            parent, "equalizer", i18n._("Sound Mode"), i18n._("Equalizer and acoustic engine"), subtitle_wrap=200,
         )
+        self._sound_mode_title = title_label
         self._sound_mode_label = subtitle_label
         self._sound_mode_select = widgets.SplitSelect(
             row, values=[], command=self._on_sound_mode_change, bg=theme.BG_WINDOW, width=230,
@@ -235,9 +275,9 @@ class MainWindow(tk.Tk):
         self._sound_mode_select.pack(side=tk.RIGHT, anchor="n", padx=(16, 0))
 
     def _build_equalizer_row(self, parent):
-        """Ligne cliquable « Équaliseur » (badge + titre + mode actif), sans fond de carte."""
+        """Clickable "Equalizer" row (badge + title + active mode), no card background."""
         row, badge, title_label, subtitle_label = self._build_row_icon_text(
-            parent, "equalizer", "Équaliseur", "", subtitle_wrap=280,
+            parent, "equalizer", i18n._("Equalizer"), "", subtitle_wrap=280,
         )
         self._eq_row = row
         self._eq_nav_badge = badge
@@ -270,8 +310,52 @@ class MainWindow(tk.Tk):
         self._eq_nav_subtitle.config(fg=theme.FG_SECONDARY if enabled else theme.FG_THUMB_DISABLED)
         self._set_row_cursor(self._eq_row, "hand2" if enabled else "arrow")
 
+    def _on_language_change(self, index: int) -> None:
+        """Handles a language-selector change; persists and re-renders everything in place."""
+        if 0 <= index < len(self._lang_codes):
+            i18n.set_language(self._lang_codes[index])
+
+    def _retranslate(self, _lang: str) -> None:
+        """Registered as an i18n listener: re-applies every static text in place."""
+        self.title(i18n._("Sound Blaster G8 - Control"))
+        self._back_button.set_text(i18n._("←  Back"))
+
+        on_eq_page = self._eq_page.winfo_ismapped()
+        if on_eq_page:
+            self._title_label.config(text=i18n._("Equalizer"), font=theme.FONT_TITLE_EQ)
+        else:
+            self._title_label.config(text=i18n._("Sound Blaster G8"), font=theme.FONT_TITLE)
+
+        for key, row in self._toggle_rows.items():
+            row["title"].config(text=i18n._(row["title_msgid"]))
+            subtitle = i18n._(row["subtitle_msgid"])
+            if key in self._unavailable:
+                subtitle = f"{subtitle}\n{i18n._('(not implemented)')}"
+            row["subtitle"].config(text=subtitle)
+
+        self._sound_mode_title.config(text=i18n._("Sound Mode"))
+        subtitle = i18n._("Equalizer and acoustic engine")
+        if "sound_mode" in self._unavailable:
+            subtitle = f"{subtitle}\n{i18n._('(not implemented)')}"
+        self._sound_mode_label.config(text=subtitle)
+
+        self._eq_nav_title.config(text=i18n._("Equalizer"))
+
+        if self._controller is not None:
+            modes = self._controller.list_sound_modes()
+            self._sound_mode_slugs = [slug for slug, _label in modes]
+            self._sound_mode_labels = [i18n.sound_mode_label(slug, label) for slug, label in modes]
+            self._sound_mode_select.set_values(self._sound_mode_labels)
+            self._select_sound_mode(self._controller.get_sound_mode())
+            self._update_eq_button_label()
+
+        if self._eq_panel is not None:
+            self._eq_panel.retranslate()
+
+        self._render_status()
+
     def _init_controller(self):
-        """Initialise le contrôleur et se connecte au matériel."""
+        """Initializes the controller and connects to the hardware."""
         from ..controller import get_controller
         self._controller = get_controller()
         self._switches = {
@@ -283,32 +367,31 @@ class MainWindow(tk.Tk):
 
         modes = self._controller.list_sound_modes()
         self._sound_mode_slugs = [slug for slug, _label in modes]
-        self._sound_mode_labels = [label for _slug, label in modes]
+        self._sound_mode_labels = [i18n.sound_mode_label(slug, label) for slug, label in modes]
         self._sound_mode_select.set_values(self._sound_mode_labels)
         self._select_sound_mode(self._controller.get_sound_mode())
         self._update_eq_button_label()
 
         self._eq_panel = EQPanel(
             self._eq_page, self._controller,
-            status_callback=lambda text: self._status_label.config(text=text),
+            status_callback=self._set_status,
         )
         self._eq_panel.pack(fill=tk.BOTH, expand=True)
 
         if self._controller.connect():
             info = self._controller.get_debug_info()
-            self._status_label.config(
-                text=f"Connecté à Sound Blaster G8 (interface {info.get('interface_number')})"
+            self._set_status(
+                "Connected to Sound Blaster G8 (interface {interface})",
+                interface=info.get("interface_number"),
             )
             self._load_current_state()
         else:
-            self._status_label.config(
-                text="Aucun matériel détecté - les commandes n'auront aucun effet"
-            )
+            self._set_status("No hardware detected - commands will have no effect")
 
         self._apply_feature_availability()
 
     def _apply_feature_availability(self):
-        """Grise les contrôles dont la trame USB n'a pas encore été reversée."""
+        """Greys out controls whose USB frame hasn't been reverse-engineered yet."""
         if not self._controller:
             return
 
@@ -320,7 +403,7 @@ class MainWindow(tk.Tk):
                 row["badge"].set_enabled(False)
                 row["title"].config(fg=theme.FG_SECONDARY)
                 row["subtitle"].config(
-                    text=f"{row['subtitle'].cget('text')}\n(non implémenté)",
+                    text=f"{row['subtitle'].cget('text')}\n{i18n._('(not implemented)')}",
                     fg=theme.FG_SECONDARY,
                 )
 
@@ -328,7 +411,7 @@ class MainWindow(tk.Tk):
             self._unavailable.add("sound_mode")
             self._sound_mode_select.set_enabled(False)
             self._sound_mode_label.config(
-                text=f"{self._sound_mode_label.cget('text')}\n(non implémenté)"
+                text=f"{self._sound_mode_label.cget('text')}\n{i18n._('(not implemented)')}"
             )
 
         if not self._controller.is_feature_supported("eq"):
@@ -336,11 +419,11 @@ class MainWindow(tk.Tk):
             self._set_eq_nav_enabled(False)
 
     def _load_current_state(self):
-        """Charge l'état actuel depuis le contrôleur."""
+        """Loads the current state from the controller."""
         if not self._controller:
             return
 
-        # Charger les états
+        # Load the states
         self._direct_mode_var.set(self._controller.get_direct_mode())
         self._scout_mode_var.set(self._controller.get_scout_mode())
         self._crystalvoice_var.set(self._controller.get_crystalvoice())
@@ -348,52 +431,52 @@ class MainWindow(tk.Tk):
         self._update_eq_button_label()
 
     def _select_sound_mode(self, slug: str) -> None:
-        """Positionne le SplitSelect sur le mode sonore donné (sans déclencher l'event)."""
+        """Sets the SplitSelect to the given sound mode (without firing the event)."""
         if slug in self._sound_mode_slugs:
             self._sound_mode_select.set_index(self._sound_mode_slugs.index(slug))
 
     def _update_eq_button_label(self) -> None:
-        """Rafraîchit le sous-texte de la ligne Équaliseur avec le mode actif."""
+        """Refreshes the Equalizer row's subtitle with the active mode."""
         if not self._controller:
             return
         slug = self._controller.get_sound_mode()
         label = slug
         for mode_slug, mode_label in self._controller.list_sound_modes():
             if mode_slug == slug:
-                label = mode_label
+                label = i18n.sound_mode_label(mode_slug, mode_label)
                 break
         self._eq_nav_subtitle.config(text=label)
 
     # ------------------------------------------------------------------
-    # Navigation entre pages (pas de fenêtre flottante)
+    # Navigation between pages (no floating window)
     # ------------------------------------------------------------------
 
     def _show_main_page(self):
-        """Affiche la page principale (masque le bouton retour)."""
+        """Shows the main page (hides the back button)."""
         self._eq_page.pack_forget()
         self._back_button.place_forget()
-        self._title_label.config(text="Sound Blaster G8", font=theme.FONT_TITLE)
+        self._title_label.config(text=i18n._("Sound Blaster G8"), font=theme.FONT_TITLE)
         self._main_page.pack(expand=True, fill=tk.BOTH)
         self._fit_window_to_page()
 
     def _show_eq_page(self):
-        """Affiche la page Égaliseur (avec bouton retour en haut à gauche)."""
+        """Shows the Equalizer page (with a back button at the top left)."""
         self._main_page.pack_forget()
         self._back_button.place(x=24, rely=0.5, anchor="w")
-        self._title_label.config(text="Équaliseur", font=theme.FONT_TITLE_EQ)
+        self._title_label.config(text=i18n._("Equalizer"), font=theme.FONT_TITLE_EQ)
         self._eq_page.pack(expand=True, fill=tk.BOTH)
         self._fit_window_to_page()
         self._prepare_eq_page_async()
 
     def _prepare_eq_page_async(self):
-        """Prépare l'égaliseur (active + applique un état plat si besoin).
+        """Prepares the equalizer (enables + applies a flat state if needed).
 
-        Comportement de l'app Creative native : si aucun égaliseur n'est
-        déjà actif (mode « Désactivé »), applique un égaliseur plat (10
-        bandes + Préampli à 0 dB) et l'active - sans quoi les écritures de
-        bandes seraient bien acquittées par la carte mais resteraient
-        inaudibles. Si un mode est déjà actif, ne fait rien. Ne bloque pas
-        l'affichage : les sliders restent utilisables immédiatement.
+        Native Creative app behavior: if no equalizer is already active
+        (mode "Disabled"), applies a flat equalizer (10 bands + Preamp at
+        0 dB) and enables it - otherwise band writes would be acknowledged
+        by the card but remain inaudible. If a mode is already active, does
+        nothing. Doesn't block the display: the sliders remain usable
+        immediately.
         """
         if not self._controller:
             return
@@ -401,14 +484,12 @@ class MainWindow(tk.Tk):
         def worker():
             try:
                 ok = bool(self._controller.prepare_eq_page())
-            except Exception as exc:  # pragma: no cover - dépend du matériel
-                self.after(0, lambda: self._status_label.config(
-                    text=f"Activation de l'égaliseur : erreur ({exc})"
-                ))
+            except Exception as exc:  # pragma: no cover - depends on hardware
+                self.after(0, lambda: self._set_status("Enabling equalizer: error ({error})", error=exc))
                 return
             if ok:
                 def on_success():
-                    self._status_label.config(text="Égaliseur activé")
+                    self._set_status("Equalizer enabled")
                     if self._eq_panel is not None:
                         self._eq_panel.refresh()
                 self.after(0, on_success)
@@ -416,24 +497,34 @@ class MainWindow(tk.Tk):
         threading.Thread(target=worker, name="g8-eq-enable", daemon=True).start()
 
     def _fit_window_to_page(self):
-        """Redimensionne la fenêtre pour que la page affichée tienne entière."""
+        """Resizes the window so the displayed page fits entirely."""
         self.update_idletasks()
         width = max(MIN_WINDOW_WIDTH, self.winfo_reqwidth())
         height = self.winfo_reqheight()
         self.geometry(f"{width}x{height}")
 
+    def _set_status(self, template: str, **kwargs) -> None:
+        """Single choke point for status-bar text: stores (template, kwargs) so
+        the message can be re-rendered in the current language on demand
+        (e.g. after a language switch), then renders it now."""
+        self._last_status = (template, kwargs)
+        self._render_status()
+
+    def _render_status(self) -> None:
+        template, kwargs = self._last_status
+        text = i18n._(template).format(**kwargs) if kwargs else i18n._(template)
+        self._status_label.config(text=text)
+
     # ------------------------------------------------------------------
-    # Bascules (exécutées hors du thread graphique)
+    # Toggles (run outside the GUI thread)
     # ------------------------------------------------------------------
 
     def _on_reconnecting(self, active: bool) -> None:
-        """Relais de l'événement ``reconnecting`` du contrôleur (worker thread)."""
-        text = (
-            "Direct Mode : reconnexion de la carte…"
-            if active
-            else "Carte reconnectée"
-        )
-        self.after(0, lambda: self._status_label.config(text=text))
+        """Relays the controller's ``reconnecting`` event (worker thread)."""
+        if active:
+            self.after(0, lambda: self._set_status("Direct Mode: reconnecting the device…"))
+        else:
+            self.after(0, lambda: self._set_status("Device reconnected"))
 
     def _handle_toggle(
         self,
@@ -443,11 +534,11 @@ class MainWindow(tk.Tk):
         setter: Callable[[bool], bool],
         getter: Optional[Callable[[], bool]] = None,
     ):
-        """Applique un toggle dans un thread, puis resynchronise l'affichage.
+        """Runs a toggle in a thread, then resynchronizes the display.
 
-        Le setter peut bloquer plusieurs secondes (reset USB du Direct Mode) :
-        l'interrupteur est désactivé pendant l'opération et le résultat est
-        appliqué dans le thread Tk.
+        The setter may block for several seconds (Direct Mode's USB reset):
+        the switch is disabled during the operation and the result is
+        applied on the Tk thread.
         """
         if not self._controller:
             return
@@ -456,7 +547,7 @@ class MainWindow(tk.Tk):
         switch = self._switches.get(name)
         if switch is not None:
             switch.set_enabled(False)
-        self._status_label.config(text=f"{label} : envoi de la commande…")
+        self._set_status("{label}: sending command…", label=label)
 
         def worker():
             error: Optional[Exception] = None
@@ -465,10 +556,10 @@ class MainWindow(tk.Tk):
             try:
                 ok = bool(setter(requested))
                 if getter is not None:
-                    # Relire l'état matériel réel : après un reset USB, la
-                    # carte est seule source de vérité.
+                    # Re-read the real hardware state: after a USB reset,
+                    # the card is the sole source of truth.
                     state = getter()
-            except Exception as exc:  # pragma: no cover - dépend du matériel
+            except Exception as exc:  # pragma: no cover - depends on hardware
                 error = exc
             self.after(0, lambda: self._finish_toggle(
                 name, label, var, requested, ok, state, error
@@ -486,52 +577,48 @@ class MainWindow(tk.Tk):
         state: Optional[bool],
         error: Optional[Exception],
     ):
-        """Fin d'une bascule : réactive l'interrupteur et affiche l'état réel."""
+        """End of a toggle: re-enables the switch and shows the real state."""
         switch = self._switches.get(name)
         if switch is not None and name not in self._unavailable:
             switch.set_enabled(True)
 
-        # État affiché : celui du matériel s'il a pu être relu, sinon celui
-        # demandé (succès) ou l'ancien (échec).
+        # Displayed state: the hardware's if it could be re-read, otherwise
+        # the requested one (success) or the previous one (failure).
         effective = state if state is not None else (requested if ok else not requested)
         var.set(effective)
 
         if error is not None:
-            self._status_label.config(text=f"{label} : erreur ({error})")
+            self._set_status("{label}: error ({error})", label=label, error=error)
         elif ok:
-            self._status_label.config(
-                text=f"{label} {'activé' if effective else 'désactivé'}"
-            )
+            self._set_status("{label} enabled" if effective else "{label} disabled", label=label)
         else:
-            self._status_label.config(
-                text=f"{label} : échec de la commande (voir la console)"
-            )
+            self._set_status("{label}: command failed (see console)", label=label)
 
     def _on_direct_mode_change(self):
-        """Gère le changement du Direct Mode."""
+        """Handles a Direct Mode change."""
         self._handle_toggle(
-            "direct_mode", "Direct Mode", self._direct_mode_var,
+            "direct_mode", i18n._("Direct Mode"), self._direct_mode_var,
             lambda v: self._controller.set_direct_mode(v),
             getter=lambda: self._controller.get_direct_mode(),
         )
 
     def _on_scout_mode_change(self):
-        """Gère le changement du Scout Mode."""
+        """Handles a Scout Mode change."""
         self._handle_toggle(
-            "scout_mode", "Scout Mode", self._scout_mode_var,
+            "scout_mode", i18n._("Scout Mode"), self._scout_mode_var,
             lambda v: self._controller.set_scout_mode(v),
             getter=lambda: self._controller.get_scout_mode(),
         )
 
     def _on_crystalvoice_change(self):
-        """Gère le changement du CrystalVoice."""
+        """Handles a CrystalVoice change."""
         self._handle_toggle(
-            "crystalvoice", "CrystalVoice", self._crystalvoice_var,
+            "crystalvoice", i18n._("CrystalVoice"), self._crystalvoice_var,
             lambda v: self._controller.set_crystalvoice(v),
         )
 
     def _on_sound_mode_change(self, index: int):
-        """Gère la sélection d'un mode sonore dans le SplitSelect."""
+        """Handles a sound-mode selection in the SplitSelect."""
         if not self._controller:
             return
 
@@ -541,14 +628,14 @@ class MainWindow(tk.Tk):
         label = self._sound_mode_labels[index]
 
         self._sound_mode_select.set_enabled(False)
-        self._status_label.config(text=f"Mode Sonore « {label} » : envoi de la commande…")
+        self._set_status('Sound Mode "{label}": sending command…', label=label)
 
         def worker():
             error: Optional[Exception] = None
             ok = False
             try:
                 ok = bool(self._controller.set_sound_mode(slug))
-            except Exception as exc:  # pragma: no cover - dépend du matériel
+            except Exception as exc:  # pragma: no cover - depends on hardware
                 error = exc
             self.after(0, lambda: self._finish_sound_mode_change(slug, label, ok, error))
 
@@ -561,21 +648,19 @@ class MainWindow(tk.Tk):
         ok: bool,
         error: Optional[Exception],
     ):
-        """Fin de la sélection d'un mode sonore : réactive le SplitSelect."""
+        """End of a sound-mode selection: re-enables the SplitSelect."""
         if "sound_mode" not in self._unavailable:
             self._sound_mode_select.set_enabled(True)
 
-        # En cas d'échec, resynchroniser l'affichage sur l'état réel du contrôleur.
+        # On failure, resynchronize the display with the controller's real state.
         self._select_sound_mode(self._controller.get_sound_mode())
         self._update_eq_button_label()
         if self._eq_panel is not None:
             self._eq_panel.refresh()
 
         if error is not None:
-            self._status_label.config(text=f"Mode Sonore : erreur ({error})")
+            self._set_status("Sound Mode: error ({error})", error=error)
         elif ok:
-            self._status_label.config(text=f"Mode Sonore « {label} » appliqué")
+            self._set_status('Sound Mode "{label}" applied', label=label)
         else:
-            self._status_label.config(
-                text=f"Mode Sonore « {label} » : échec de la commande (voir la console)"
-            )
+            self._set_status('Sound Mode "{label}": command failed (see console)', label=label)

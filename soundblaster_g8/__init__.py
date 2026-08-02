@@ -1,4 +1,4 @@
-"""Sound Blaster G8 - Application de contrôle pour Creative Sound Blaster G8."""
+"""Sound Blaster G8 - Control application for the Creative Sound Blaster G8."""
 
 from . import protocol
 from .controller import SoundBlasterController, get_controller

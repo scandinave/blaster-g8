@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-Génère ``soundblaster_g8/sound_modes.py`` à partir des captures USB
-« Sound Mode » (une capture ``.pcapng`` par mode, voir
-``soundblaster_g8/protocol.py`` pour le format des trames CMD_SET_FLOAT).
+Generates ``soundblaster_g8/sound_modes.py`` from the "Sound Mode" USB
+captures (one ``.pcapng`` capture per mode, see ``soundblaster_g8/protocol.py``
+for the CMD_SET_FLOAT frame format).
 
-Outil de développement : il n'est pas utilisé par l'application au runtime
-(pas de dépendance à ``tshark`` ni aux fichiers ``.pcapng`` en dehors de
-cette génération). À relancer si de nouvelles captures sont fournies.
+Development tool: not used by the application at runtime (no dependency on
+``tshark`` or ``.pcapng`` files outside of this generation step). Re-run it
+if new captures are provided.
 
-Utilisation ::
+Usage::
 
     python tools/extract_sound_modes.py --input "~/Documents/Sound Blaster G8/SoundMode"
 """
@@ -26,18 +26,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from soundblaster_g8 import protocol  # noqa: E402
 
-# Offset du payload utile dans une trame "SET_REPORT Request" telle que
-# capturée par USBPcap : 28 o de pseudo-header + 8 o de Setup Data.
+# Offset of the useful payload within a "SET_REPORT Request" frame as
+# captured by USBPcap: 28 B of pseudo-header + 8 B of Setup Data.
 PAYLOAD_OFFSET = 36
 REPORT_SIZE = 64
 
-# Fichiers de capture qui ne sont pas des modes (juste un bascule on/off de
-# l'égaliseur maître, ou une session de calibration des sliders individuels
-# utilisée pour reverse-engineer Préampli/Basse/Aigus) : exclus de la
-# génération.
+# Capture files that aren't modes (just an on/off toggle of the master
+# equalizer, or a calibration session of the individual sliders used to
+# reverse-engineer Preamp/Bass/Treble): excluded from generation.
 EXCLUDED_FILENAMES = {"Equalizer.pcapng", "Equalizer-manual.pcapng"}
 
-# Capture correspondant au mode par défaut (aucun égaliseur actif).
+# Capture matching the default mode (no equalizer active).
 DEFAULT_SOURCE = "Equalizer-effects-disabled.pcapng"
 DEFAULT_SLUG = "disabled"
 DEFAULT_LABEL = "Désactivé"
@@ -66,8 +65,8 @@ def label_from_slug(slug: str) -> str:
         if word.lower() in ACRONYMS:
             words.append(word.upper())
         elif word.lower() == "s" and words:
-            # Apostrophe possessive perdue lors du "slugify" du nom de
-            # fichier ("baldur-s-gate" -> "Baldur's Gate").
+            # Possessive apostrophe lost during the filename "slugify"
+            # ("baldur-s-gate" -> "Baldur's Gate").
             words[-1] += "'s"
         else:
             words.append(word.capitalize())
@@ -75,7 +74,7 @@ def label_from_slug(slug: str) -> str:
 
 
 def extract_set_report_requests(path: Path) -> list[bytes]:
-    """Retourne le payload brut (5a <type> <len> ...) de chaque écriture."""
+    """Returns the raw payload (5a <type> <len> ...) of each write."""
     result = subprocess.run(
         [
             "tshark", "-r", str(path),
@@ -100,7 +99,7 @@ def extract_set_report_requests(path: Path) -> list[bytes]:
 
 
 def decode_float_writes(frames: list[bytes]) -> list[tuple[int, float]]:
-    """Ne garde que les écritures CMD_SET_FLOAT, décodées en (param, valeur)."""
+    """Keeps only CMD_SET_FLOAT writes, decoded as (param, value)."""
     writes: list[tuple[int, float]] = []
     for raw in frames:
         frame_type = raw[1]
@@ -141,14 +140,14 @@ def generate(input_dir: Path, output_path: Path) -> None:
     pcap_files = sorted(input_dir.glob("*.pcapng"))
     pcap_files = [p for p in pcap_files if p.name not in EXCLUDED_FILENAMES]
     if not pcap_files:
-        raise SystemExit(f"Aucun fichier .pcapng trouvé dans {input_dir}")
+        raise SystemExit(f"No .pcapng file found in {input_dir}")
 
     modes: list[tuple[str, str, list[tuple[int, float]], tuple[float, ...], float, bool]] = []
     for path in pcap_files:
         frames = extract_set_report_requests(path)
         writes = decode_float_writes(frames)
         if not writes:
-            print(f"AVERTISSEMENT: aucune écriture CMD_SET_FLOAT dans {path.name}, ignoré")
+            print(f"WARNING: no CMD_SET_FLOAT write in {path.name}, skipped")
             continue
         missing_bands = [
             f"0x{p:02x}" for p in protocol.EQ_BAND_PARAMS
@@ -156,8 +155,8 @@ def generate(input_dir: Path, output_path: Path) -> None:
         ]
         if missing_bands:
             print(
-                f"AVERTISSEMENT: {path.name} - capture incomplète "
-                f"(bandes manquantes: {missing_bands}), ignoré"
+                f"WARNING: {path.name} - incomplete capture "
+                f"(missing bands: {missing_bands}), skipped"
             )
             continue
         slug = slug_from_filename(path)
@@ -166,18 +165,18 @@ def generate(input_dir: Path, output_path: Path) -> None:
         preamp = preamp_from_writes(writes)
         eq_enabled = eq_enabled_from_writes(writes)
         modes.append((slug, label, writes, bands, preamp, eq_enabled))
-        print(f"  {path.name:<45} -> slug={slug!r:<25} ({len(writes)} écritures)")
+        print(f"  {path.name:<45} -> slug={slug!r:<25} ({len(writes)} writes)")
 
-    # Le mode par défaut en premier, puis ordre alphabétique du label.
+    # Default mode first, then alphabetical order by label.
     modes.sort(key=lambda m: (m[0] != DEFAULT_SLUG, m[1]))
 
     lines = [
         '"""',
-        "Modes sonores de la Sound Blaster G8, générés depuis les captures USB.",
+        "Sound Blaster G8 sound modes, generated from USB captures.",
         "",
-        f"Généré par ``tools/extract_sound_modes.py`` à partir de {len(modes)} capture(s)",
-        "dans le dossier « Sound Mode ». Ne pas éditer à la main : relancer le script",
-        "si de nouvelles captures sont fournies.",
+        f"Generated by ``tools/extract_sound_modes.py`` from {len(modes)} capture(s)",
+        "in the \"Sound Mode\" folder. Do not edit by hand: re-run the script if new",
+        "captures are provided.",
         '"""',
         "",
         "from __future__ import annotations",
@@ -187,17 +186,17 @@ def generate(input_dir: Path, output_path: Path) -> None:
         "",
         "@dataclass(frozen=True)",
         "class SoundMode:",
-        '    """Un mode sonore : séquence de trames CMD_SET_FLOAT à rejouer."""',
+        '    """A sound mode: sequence of CMD_SET_FLOAT frames to replay."""',
         "",
         "    slug: str",
         "    label: str",
-        "    #: Séquence ordonnée (param_id, valeur) - ordre de capture préservé.",
+        "    #: Ordered sequence (param_id, value) - capture order preserved.",
         "    writes: tuple[tuple[int, float], ...]",
-        "    #: Les 10 bandes d'égaliseur, en dB (dérivées de ``writes``).",
+        "    #: The 10 equalizer bands, in dB (derived from ``writes``).",
         "    bands: tuple[float, ...]",
-        "    #: Préampli (param 0x0a), en dB (dérivé de ``writes``).",
+        "    #: Preamp (param 0x0a), in dB (derived from ``writes``).",
         "    preamp: float",
-        "    #: Égaliseur actif ou non (param 0x09, dérivé de ``writes``).",
+        "    #: Whether the equalizer is active (param 0x09, derived from ``writes``).",
         "    eq_enabled: bool",
         "",
         "",
@@ -218,25 +217,25 @@ def generate(input_dir: Path, output_path: Path) -> None:
     lines.append("")
 
     output_path.write_text("\n".join(lines), encoding="utf-8")
-    print(f"\n{len(modes)} mode(s) écrit(s) dans {output_path}")
+    print(f"\n{len(modes)} mode(s) written to {output_path}")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--input", required=True, type=Path,
-        help="dossier contenant les captures Equalizer-*.pcapng",
+        help="folder containing the Equalizer-*.pcapng captures",
     )
     parser.add_argument(
         "--output", type=Path,
         default=Path(__file__).resolve().parent.parent / "soundblaster_g8" / "sound_modes.py",
-        help="fichier Python généré (défaut: soundblaster_g8/sound_modes.py)",
+        help="generated Python file (default: soundblaster_g8/sound_modes.py)",
     )
     args = parser.parse_args()
 
     input_dir = args.input.expanduser()
     if not input_dir.is_dir():
-        raise SystemExit(f"Dossier introuvable: {input_dir}")
+        raise SystemExit(f"Folder not found: {input_dir}")
 
     generate(input_dir, args.output)
     return 0

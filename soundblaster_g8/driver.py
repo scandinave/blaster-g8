@@ -1,28 +1,28 @@
 """
-Driver HID pour la carte son Creative Sound Blaster G8.
+HID driver for the Creative Sound Blaster G8 sound card.
 
-Le protocole (framing, opcodes, identifiants de paramètres) est isolé dans
-:mod:`soundblaster_g8.protocol`, la sélection du backend hidapi dans
-:mod:`soundblaster_g8.hidbackend`. Ce module ne s'occupe que des I/O HID.
+The protocol (framing, opcodes, parameter identifiers) is isolated in
+:mod:`soundblaster_g8.protocol`, hidapi backend selection in
+:mod:`soundblaster_g8.hidbackend`. This module only handles HID I/O.
 
-Points clés de l'implémentation (issus de l'analyse du pcap) :
+Key implementation points (from pcap analysis):
 
-1. La carte expose deux interfaces HID. Le canal de contrôle est celui de
-   *usage page* ``0xFF01`` (interface 4). Ouvrir le device via
-   ``hid.device().open(VID, PID)`` peut tomber sur l'interface Consumer
-   (usage page 0x0C, interface 3) qui rejette les commandes : on ouvre donc
-   explicitement le bon ``path`` retourné par ``enumerate()``.
-2. L'interface 4 n'a **pas d'endpoint interrupt OUT** : toute écriture est un
-   transfert de contrôle ``SET_REPORT`` ``wValue=0x0200`` / ``wLength=64``.
-   On écrit donc systématiquement ``b"\\x00" + pad_report(frame)``.
-3. Les réponses arrivent en notifications de 64 octets sur l'endpoint
-   interrupt IN 0x85, lues via ``hid_read``.
-4. Une bascule du Direct Mode (cmd 0x39) provoque un **reset USB** ~0.6 s
-   après l'ACK : le handle doit être fermé puis réouvert (:meth:`reconnect`).
-5. Les handles hidapi ne sont pas *thread-safe* et la GUI appelle le driver
-   depuis un worker thread : toutes les I/O sont sérialisées par un verrou.
+1. The card exposes two HID interfaces. The control channel is the one
+   with *usage page* ``0xFF01`` (interface 4). Opening the device via
+   ``hid.device().open(VID, PID)`` can land on the Consumer interface
+   (usage page 0x0C, interface 3), which rejects commands: so we
+   explicitly open the correct ``path`` returned by ``enumerate()``.
+2. Interface 4 has **no interrupt OUT endpoint**: every write is a
+   ``SET_REPORT`` control transfer, ``wValue=0x0200`` / ``wLength=64``.
+   We therefore always write ``b"\\x00" + pad_report(frame)``.
+3. Responses arrive as 64-byte notifications on interrupt IN endpoint
+   0x85, read via ``hid_read``.
+4. Toggling Direct Mode (cmd 0x39) triggers a **USB reset** ~0.6 s after
+   the ACK: the handle must be closed then reopened (:meth:`reconnect`).
+5. hidapi handles aren't *thread-safe* and the GUI calls the driver from
+   a worker thread: all I/O is serialized through a lock.
 
-Compatible macOS et Linux (et Windows via hidapi, non testé).
+Compatible with macOS and Linux (and Windows via hidapi, untested).
 """
 
 from __future__ import annotations
@@ -35,54 +35,54 @@ from typing import Callable, Optional
 from . import hidbackend, protocol
 from .protocol import DecodedState, Frame
 
-# Plateforme courante : 'Darwin' (macOS), 'Linux', 'Windows'
+# Current platform: 'Darwin' (macOS), 'Linux', 'Windows'
 PLATFORM = platform.system()
 
-# Identifiants USB
+# USB identifiers
 VENDOR_ID = 0x041E  # Creative Technology Ltd
 PRODUCT_ID = 0x329B  # Sound Blaster G8
 
-# Interface HID de contrôle (voir docstring de protocol.py)
+# Control HID interface (see protocol.py's docstring)
 CONTROL_USAGE_PAGE = 0xFF01
 CONTROL_INTERFACE_NUMBER = 4
 
-# Taille des rapports d'entrée sur l'interface de contrôle
+# Input report size on the control interface
 INPUT_REPORT_SIZE = protocol.REPORT_SIZE
 
-# Délais par défaut (ms)
+# Default timeouts (ms)
 ACK_TIMEOUT_MS = 300
 DRAIN_TIMEOUT_MS = 5
 PROBE_TIMEOUT_MS = 400
 
-# Reconnexion après le reset USB provoqué par une bascule du Direct Mode.
-# Chronologie du pcap : reset à +0.6 s, réapparition du device à +1.3 s.
+# Reconnection after the USB reset triggered by toggling Direct Mode.
+# Pcap timeline: reset at +0.6 s, device reappears at +1.3 s.
 RECONNECT_TIMEOUT_S = 12.0
 RECONNECT_INTERVAL_S = 0.25
 RECONNECT_GRACE_S = 1.0
 
-# Durée pendant laquelle on absorbe les notifications 0x1a / 0x11 émises en
-# rafale juste après une bascule du Direct Mode.
+# Duration for which we absorb the 0x1a / 0x11 notifications emitted in a
+# burst right after toggling Direct Mode.
 TOGGLE_DRAIN_S = 0.25
 
 
 class SoundBlasterG8Error(Exception):
-    """Erreur générique de la carte Sound Blaster G8."""
+    """Generic Sound Blaster G8 card error."""
 
 
 class DeviceNotFoundError(SoundBlasterG8Error):
-    """L'interface HID de contrôle n'a pas été trouvée."""
+    """The control HID interface wasn't found."""
 
 
 class DeviceConnectionError(SoundBlasterG8Error):
-    """L'ouverture du device HID a échoué (souvent un problème de droits)."""
+    """Opening the HID device failed (often a permissions issue)."""
 
 
 class CommandRejectedError(SoundBlasterG8Error):
-    """La carte a explicitement rejeté la commande envoyée."""
+    """The card explicitly rejected the sent command."""
 
 
 class FeatureNotSupportedError(SoundBlasterG8Error):
-    """Fonction non encore reversée : aucune trame USB connue."""
+    """Feature not yet reverse-engineered: no known USB frame."""
 
 
 def _log(message: str) -> None:
@@ -90,11 +90,11 @@ def _log(message: str) -> None:
 
 
 class SoundBlasterG8Driver:
-    """Driver HID de la Sound Blaster G8.
+    """HID driver for the Sound Blaster G8.
 
-    Le driver peut fonctionner en mode simulation (aucun matériel détecté) :
-    dans ce cas les commandes sont journalisées mais rien n'est envoyé, et
-    :meth:`is_connected` renvoie ``False``.
+    The driver can run in simulation mode (no hardware detected): in that
+    case commands are logged but nothing is sent, and :meth:`is_connected`
+    returns ``False``.
     """
 
     def __init__(self, debug: bool = False, allow_simulation: bool = True):
@@ -106,38 +106,38 @@ class SoundBlasterG8Driver:
         self._simulated = False
         self._state = DecodedState()
 
-        # Les handles hidapi ne sont pas thread-safe : toutes les I/O (write,
-        # read, open, close) passent par ce verrou. RLock car set_direct_mode()
-        # appelle reconnect() en gardant déjà le verrou.
+        # hidapi handles aren't thread-safe: all I/O (write, read, open,
+        # close) goes through this lock. RLock because set_direct_mode()
+        # calls reconnect() while already holding the lock.
         self._io_lock = threading.RLock()
         self._in_reconnect = False
 
-        #: Callback optionnel ``(bool) -> None`` appelé au début et à la fin
-        #: d'une reconnexion, pour que la GUI puisse prévenir l'utilisateur.
+        #: Optional ``(bool) -> None`` callback called at the start and end
+        #: of a reconnection, so the GUI can notify the user.
         self.on_reconnecting: Optional[Callable[[bool], None]] = None
 
-        _log(f"Initialisation du driver (plateforme: {PLATFORM}, "
-             f"backend HID: {hidbackend.backend_name()})")
+        _log(f"Initializing the driver (platform: {PLATFORM}, "
+             f"HID backend: {hidbackend.backend_name()})")
 
     # ------------------------------------------------------------------
-    # Découverte et connexion
+    # Discovery and connection
     # ------------------------------------------------------------------
 
     @staticmethod
     def backend_name() -> str:
-        """Nom du backend hidapi retenu (``hidraw``, ``libusb``, ``iokit``...)."""
+        """Name of the selected hidapi backend (``hidraw``, ``libusb``, ``iokit``...)."""
         return hidbackend.backend_name()
 
     @staticmethod
     def list_interfaces() -> list[dict]:
-        """Retourne toutes les interfaces HID exposées par la carte."""
+        """Returns every HID interface exposed by the card."""
         try:
             return hidbackend.enumerate(VENDOR_ID, PRODUCT_ID)
         except ImportError as exc:
-            _log(f"Backend HID indisponible: {exc}")
+            _log(f"HID backend unavailable: {exc}")
             return []
-        except Exception as exc:  # pragma: no cover - dépend du back-end
-            _log(f"Échec de l'énumération HID: {exc}")
+        except Exception as exc:  # pragma: no cover - depends on the backend
+            _log(f"HID enumeration failed: {exc}")
             return []
 
     @classmethod
@@ -146,23 +146,23 @@ class SoundBlasterG8Driver:
         interfaces: list[dict],
         serial_number: Optional[str] = None,
     ) -> Optional[dict]:
-        """Choisit l'interface vendor (usage page 0xFF01 / interface 4).
+        """Picks the vendor interface (usage page 0xFF01 / interface 4).
 
-        L'ordre d'énumération de hidapi n'est pas garanti : on filtre donc
-        explicitement au lieu de prendre la première interface trouvée. Trois
-        critères, du plus fiable au plus permissif :
+        hidapi's enumeration order isn't guaranteed: so we filter
+        explicitly instead of taking the first interface found. Three
+        criteria, from most to least reliable:
 
-        1. ``usage_page == 0xFF01`` : chemin normal sur macOS/IOKit et
+        1. ``usage_page == 0xFF01``: normal path on macOS/IOKit and
            Linux/hidraw.
-        2. ``interface_number == 4`` : **chemin normal sur Linux avec le
-           backend libusb**, qui ne renseigne jamais ``usage_page`` (il vaut
-           toujours 0 dans ``hid_enumerate``). Ce n'est donc pas un cas
-           dégradé mais la voie habituelle des wheels ``pip install hidapi``.
-        3. ``input_report_length == 64`` : dernier recours, l'interface
-           Consumer utilisant des rapports de 16 octets.
+        2. ``interface_number == 4``: **normal path on Linux with the
+           libusb backend**, which never populates ``usage_page`` (it's
+           always 0 in ``hid_enumerate``). So this isn't a degraded case
+           but the usual path for ``pip install hidapi`` wheels.
+        3. ``input_report_length == 64``: last resort, since the Consumer
+           interface uses 16-byte reports.
         """
         candidates = interfaces
-        # Plusieurs cartes branchées : on reste sur celle déjà ouverte.
+        # Multiple cards plugged in: stick with the one already opened.
         if serial_number:
             same_card = [i for i in interfaces if i.get("serial_number") == serial_number]
             if same_card:
@@ -180,39 +180,39 @@ class SoundBlasterG8Driver:
         return None
 
     def connect(self, force: bool = False) -> bool:
-        """Ouvre l'interface HID de contrôle.
+        """Opens the control HID interface.
 
         Args:
-            force: rouvre le device même si un handle est déjà mémorisé. Sert
-                après un reset USB, où l'ancien handle est encore non nul mais
-                pointe sur un nœud moribond.
+            force: reopens the device even if a handle is already cached.
+                Used after a USB reset, where the old handle is still
+                non-null but points to a dying node.
 
         Returns:
-            ``True`` si la carte est réellement connectée, ``False`` en mode
-            simulation.
+            ``True`` if the card is actually connected, ``False`` in
+            simulation mode.
 
         Raises:
-            DeviceNotFoundError / DeviceConnectionError si ``allow_simulation``
-            est ``False``.
+            DeviceNotFoundError / DeviceConnectionError if
+            ``allow_simulation`` is ``False``.
         """
         with self._io_lock:
             if self._device is not None:
                 if not force:
-                    _log("Déjà connecté")
+                    _log("Already connected")
                     return True
                 self._close_quietly()
 
-            _log("Tentative de connexion à la carte Sound Blaster G8...")
+            _log("Attempting to connect to the Sound Blaster G8 card...")
 
             if not hidbackend.is_available():
                 return self._fail(
-                    "aucun backend hidapi disponible ('pip install hidapi')",
+                    "no hidapi backend available ('pip install hidapi')",
                     DeviceConnectionError,
                 )
 
             interfaces = self.list_interfaces()
             _log(
-                f"Recherche du device HID VID={VENDOR_ID:04x}, PID={PRODUCT_ID:04x} "
+                f"Looking for HID device VID={VENDOR_ID:04x}, PID={PRODUCT_ID:04x} "
                 f"(backend {hidbackend.backend_name()})..."
             )
 
@@ -228,16 +228,16 @@ class SoundBlasterG8Driver:
 
             if not interfaces:
                 return self._fail(
-                    "aucune interface HID trouvée pour la Sound Blaster G8",
+                    "no HID interface found for the Sound Blaster G8",
                     DeviceNotFoundError,
                 )
 
             target = self._select_control_interface(interfaces, self._serial_number)
             if target is None:
                 return self._fail(
-                    f"interface de contrôle (usage page 0x{CONTROL_USAGE_PAGE:04x} "
-                    f"ou interface {CONTROL_INTERFACE_NUMBER}) introuvable parmi "
-                    f"{len(interfaces)} interface(s) HID",
+                    f"control interface (usage page 0x{CONTROL_USAGE_PAGE:04x} "
+                    f"or interface {CONTROL_INTERFACE_NUMBER}) not found among "
+                    f"{len(interfaces)} HID interface(s)",
                     DeviceNotFoundError,
                 )
 
@@ -245,54 +245,54 @@ class SoundBlasterG8Driver:
                 device = hidbackend.open_path(target["path"])
             except Exception as exc:
                 return self._fail(
-                    f"ouverture de l'interface de contrôle impossible: {exc}",
+                    f"unable to open the control interface: {exc}",
                     DeviceConnectionError,
                 )
 
             self._device = device
             self._device_info = target
             self._simulated = False
-            # Mémorisé au premier connect : après un reset USB, le path change
-            # mais le numéro de série permet de rouvrir la même carte.
+            # Cached on first connect: after a USB reset the path changes,
+            # but the serial number lets us reopen the same card.
             if not self._serial_number:
                 self._serial_number = target.get("serial_number") or None
 
             try:
                 device.set_nonblocking(False)
-            except Exception:  # pragma: no cover - certains back-ends l'ignorent
+            except Exception:  # pragma: no cover - some backends ignore it
                 pass
 
             _log(
-                "Connexion HID établie sur l'interface de contrôle "
+                "HID connection established on the control interface "
                 f"(interface={target.get('interface_number')}, "
                 f"usage_page=0x{target.get('usage_page', 0):04x})"
             )
             if self._debug:
-                _log(f"  Fabricant : {target.get('manufacturer_string')}")
-                _log(f"  Produit   : {target.get('product_string')}")
-                _log(f"  Série     : {target.get('serial_number')}")
+                _log(f"  Manufacturer: {target.get('manufacturer_string')}")
+                _log(f"  Product     : {target.get('product_string')}")
+                _log(f"  Serial      : {target.get('serial_number')}")
 
-            # Les notifications éventuellement en attente renseignent l'état initial.
+            # Any pending notifications provide the initial state.
             self.poll()
             return True
 
     def _fail(self, reason: str, exc_type: type[SoundBlasterG8Error]) -> bool:
-        """Gère un échec de connexion : exception ou repli en simulation."""
-        _log(f"ERREUR: {reason}")
+        """Handles a connection failure: exception or fall back to simulation."""
+        _log(f"ERROR: {reason}")
         if not self._allow_simulation:
             raise exc_type(reason)
 
         self._simulated = True
-        _log("Mode simulation activé (aucune commande ne sera envoyée)")
+        _log("Simulation mode enabled (no command will be sent)")
         if PLATFORM == "Darwin":
-            _log("Sur macOS, vérifiez : 'system_profiler SPUSBDataType | grep -A5 G8'")
+            _log("On macOS, check: 'system_profiler SPUSBDataType | grep -A5 G8'")
         elif PLATFORM == "Linux":
-            _log("Sur Linux, vérifiez 'lsusb', l'accès à /dev/hidraw* et la règle udev")
-            _log("  (voir udev/99-soundblaster-g8.rules)")
+            _log("On Linux, check 'lsusb', access to /dev/hidraw* and the udev rule")
+            _log("  (see udev/99-soundblaster-g8.rules)")
         return False
 
     def _close_quietly(self) -> None:
-        """Ferme le handle courant en ignorant toute erreur (best effort)."""
+        """Closes the current handle, ignoring any error (best effort)."""
         device, self._device = self._device, None
         if device is None:
             return
@@ -300,33 +300,33 @@ class SoundBlasterG8Driver:
             device.close()
         except Exception as exc:
             if self._debug:
-                _log(f"fermeture du handle ignorée: {exc}")
+                _log(f"ignored error while closing handle: {exc}")
 
     def _invalidate_device(self, reason: str) -> None:
-        """Marque le handle comme mort (après un reset USB, par exemple)."""
-        _log(f"Handle HID invalidé : {reason}")
+        """Marks the handle as dead (e.g. after a USB reset)."""
+        _log(f"HID handle invalidated: {reason}")
         self._close_quietly()
         self._device_info = {}
 
     def disconnect(self) -> None:
-        """Ferme la connexion HID."""
+        """Closes the HID connection."""
         with self._io_lock:
             if self._device is not None:
                 self._close_quietly()
-                _log("Device HID fermé")
+                _log("HID device closed")
             self._device_info = {}
             self._simulated = False
 
     def is_connected(self) -> bool:
-        """``True`` uniquement si le matériel réel est ouvert."""
+        """``True`` only if real hardware is open."""
         return self._device is not None
 
     def is_simulated(self) -> bool:
-        """``True`` si le driver tourne sans matériel."""
+        """``True`` if the driver is running without hardware."""
         return self._simulated
 
     def get_debug_info(self) -> dict:
-        """Informations utiles au diagnostic."""
+        """Information useful for diagnostics."""
         return {
             "platform": PLATFORM,
             "hid_backend": hidbackend.backend_name(),
@@ -346,7 +346,7 @@ class SoundBlasterG8Driver:
         }
 
     # ------------------------------------------------------------------
-    # Reconnexion après reset USB
+    # Reconnection after a USB reset
     # ------------------------------------------------------------------
 
     def reconnect(
@@ -354,18 +354,18 @@ class SoundBlasterG8Driver:
         timeout_s: float = RECONNECT_TIMEOUT_S,
         interval_s: float = RECONNECT_INTERVAL_S,
     ) -> bool:
-        """Rouvre le canal de contrôle après un reset USB de la carte.
+        """Reopens the control channel after a USB reset of the card.
 
-        Chronologie observée dans le pcap, à partir de la commande 0x39 :
-        reset/disconnect à +0.6 s, réapparition du device à +1.3 s. On laisse
-        donc une seconde de grâce avant de commencer à réénumérer, puis on
-        retente jusqu'au *deadline* : sous Linux, ``udev`` peut n'avoir pas
-        encore appliqué les droits sur le nouveau ``/dev/hidrawN`` (course
-        classique -> ``PermissionError`` transitoire, à retenter).
+        Timeline observed in the pcap, starting from the 0x39 command:
+        reset/disconnect at +0.6 s, device reappears at +1.3 s. So we wait
+        one grace second before starting to re-enumerate, then retry until
+        the *deadline*: on Linux, ``udev`` may not yet have applied
+        permissions on the new ``/dev/hidrawN`` (a classic race ->
+        transient ``PermissionError``, worth retrying).
 
         Returns:
-            ``True`` si un handle a été rouvert *et* validé par une sonde
-            (aller-retour réel avec la carte).
+            ``True`` if a handle was reopened *and* validated by a probe
+            (a real round-trip with the card).
         """
         with self._io_lock:
             if self._in_reconnect:
@@ -374,18 +374,18 @@ class SoundBlasterG8Driver:
             self._in_reconnect = True
             self._notify_reconnecting(True)
             try:
-                # 1. l'ancien handle est mort : on le ferme sans se soucier des
-                #    erreurs (le nœud a pu disparaître entre-temps).
+                # 1. the old handle is dead: close it without worrying
+                #    about errors (the node may have disappeared already).
                 self._close_quietly()
                 self._device_info = {}
 
-                # 2. délai de grâce : inutile d'énumérer avant que la carte ne
-                #    soit réapparue.
+                # 2. grace delay: no point enumerating before the card has
+                #    reappeared.
                 time.sleep(RECONNECT_GRACE_S)
 
                 deadline = time.monotonic() + timeout_s
                 attempt = 0
-                last_error = "aucune interface trouvée"
+                last_error = "no interface found"
 
                 while time.monotonic() < deadline:
                     attempt += 1
@@ -396,24 +396,24 @@ class SoundBlasterG8Driver:
                         )
                         if target is None:
                             last_error = (
-                                f"interface de contrôle absente "
-                                f"({len(interfaces)} interface(s) énumérée(s))"
+                                f"control interface missing "
+                                f"({len(interfaces)} interface(s) enumerated)"
                             )
                             raise LookupError(last_error)
 
                         device = hidbackend.open_path(target["path"])
                     except (OSError, PermissionError, LookupError) as exc:
-                        # Retryable : device pas encore réapparu, ou udev n'a
-                        # pas fini d'appliquer les droits sur le nouveau nœud.
+                        # Retryable: device hasn't reappeared yet, or udev
+                        # hasn't finished applying permissions on the new node.
                         last_error = str(exc) or exc.__class__.__name__
                         if self._debug:
-                            _log(f"reconnexion, tentative {attempt} : {last_error}")
+                            _log(f"reconnecting, attempt {attempt}: {last_error}")
                         time.sleep(interval_s)
                         continue
-                    except Exception as exc:  # pragma: no cover - back-end exotique
+                    except Exception as exc:  # pragma: no cover - exotic backend
                         last_error = str(exc) or exc.__class__.__name__
                         if self._debug:
-                            _log(f"reconnexion, tentative {attempt} : {last_error}")
+                            _log(f"reconnecting, attempt {attempt}: {last_error}")
                         time.sleep(interval_s)
                         continue
 
@@ -425,21 +425,21 @@ class SoundBlasterG8Driver:
                     except Exception:  # pragma: no cover
                         pass
 
-                    # 4. valider par un aller-retour réel : un handle ouvert sur
-                    #    un nœud moribond accepte parfois l'open mais rien d'autre.
+                    # 4. validate with a real round-trip: a handle opened on
+                    #    a dying node sometimes accepts the open but nothing else.
                     if self._probe():
                         _log(
-                            f"Reconnexion réussie après {attempt} tentative(s) "
+                            f"Reconnection succeeded after {attempt} attempt(s) "
                             f"(interface={target.get('interface_number')})"
                         )
                         self.poll()
                         return True
 
-                    last_error = "la sonde 0x09 n'a pas répondu"
+                    last_error = "the 0x09 probe did not respond"
                     self._close_quietly()
                     time.sleep(interval_s)
 
-                _log(f"ÉCHEC de la reconnexion après {timeout_s:.0f}s : {last_error}")
+                _log(f"Reconnection FAILED after {timeout_s:.0f}s: {last_error}")
                 return False
             finally:
                 self._in_reconnect = False
@@ -451,16 +451,16 @@ class SoundBlasterG8Driver:
             return
         try:
             callback(active)
-        except Exception as exc:  # pragma: no cover - dépend de l'appelant
-            _log(f"Erreur dans le callback on_reconnecting: {exc}")
+        except Exception as exc:  # pragma: no cover - depends on the caller
+            _log(f"Error in the on_reconnecting callback: {exc}")
 
     def _probe(self) -> bool:
-        """Aller-retour réel avec la carte : ``5a 09 01 02`` -> réponse 0x09.
+        """A real round-trip with the card: ``5a 09 01 02`` -> 0x09 response.
 
-        La réponse contient la chaîne de version du firmware
-        (``1.2.250819.0903`` sur la carte de référence, confirmé par le pcap).
-        Sert à s'assurer qu'on n'a pas rouvert le nœud moribond laissé par le
-        reset USB : celui-ci accepte l'``open`` mais ne répond plus.
+        The response contains the firmware version string
+        (``1.2.250819.0903`` on the reference card, confirmed by the pcap).
+        Used to make sure we haven't reopened the dying node left by the
+        USB reset: that one accepts the ``open`` but no longer responds.
         """
         try:
             frame = self._send_raw(
@@ -472,21 +472,21 @@ class SoundBlasterG8Driver:
             )
         except SoundBlasterG8Error as exc:
             if self._debug:
-                _log(f"sonde en échec: {exc}")
+                _log(f"probe failed: {exc}")
             return False
 
         if frame is None:
             return False
         if self._debug:
-            _log(f"sonde OK, firmware={frame.info_text!r}")
+            _log(f"probe OK, firmware={frame.info_text!r}")
         return True
 
     # ------------------------------------------------------------------
-    # Couche transport
+    # Transport layer
     # ------------------------------------------------------------------
 
     def _read_frame(self, timeout_ms: int, recover: bool = True) -> Optional[Frame]:
-        """Lit une notification et la décode (``None`` si rien n'arrive)."""
+        """Reads a notification and decodes it (``None`` if nothing arrives)."""
         with self._io_lock:
             device = self._device
             if device is None:
@@ -494,14 +494,14 @@ class SoundBlasterG8Driver:
             try:
                 data = device.read(INPUT_REPORT_SIZE, timeout_ms)
             except OSError as exc:
-                # Handle mort (reset USB, câble débranché) : on le jette et on
-                # tente une reconnexion.
-                self._invalidate_device(f"lecture HID impossible: {exc}")
+                # Dead handle (USB reset, cable unplugged): discard it and
+                # attempt a reconnection.
+                self._invalidate_device(f"HID read failed: {exc}")
                 if recover:
                     self.reconnect()
                 return None
             except Exception as exc:
-                _log(f"Erreur de lecture HID: {exc}")
+                _log(f"HID read error: {exc}")
                 return None
 
         if not data:
@@ -510,7 +510,7 @@ class SoundBlasterG8Driver:
         frame = protocol.parse_frame(bytes(data))
         if frame is None:
             if self._debug:
-                _log(f"<- rapport non décodable: {bytes(data).hex()}")
+                _log(f"<- undecodable report: {bytes(data).hex()}")
             return None
 
         self._state.apply(frame)
@@ -524,12 +524,12 @@ class SoundBlasterG8Driver:
         max_frames: int = 16,
         recover: bool = False,
     ) -> list[Frame]:
-        """Vide la file des notifications et met à jour le cache d'état.
+        """Drains the notification queue and updates the state cache.
 
         Args:
-            recover: tenter une reconnexion si le handle s'avère mort. Faux par
-                défaut : après une bascule du Direct Mode la disparition du
-                device est attendue et gérée par l'appelant.
+            recover: attempt a reconnection if the handle turns out to be
+                dead. False by default: after toggling Direct Mode, the
+                device disappearing is expected and handled by the caller.
         """
         frames: list[Frame] = []
         for _ in range(max_frames):
@@ -546,17 +546,17 @@ class SoundBlasterG8Driver:
         expect_ack: bool = True,
         timeout_ms: int = ACK_TIMEOUT_MS,
     ) -> Optional[Frame]:
-        """Envoie une trame et retourne l'ACK correspondant.
+        """Sends a frame and returns the matching ACK.
 
         Args:
-            frame_type: type de trame (ex. ``protocol.CMD_SET``).
-            payload: contenu de la trame, en-tête exclu.
-            expect_ack: attendre et retourner l'accusé de réception.
-            timeout_ms: budget d'attente de l'ACK.
+            frame_type: frame type (e.g. ``protocol.CMD_SET``).
+            payload: frame content, header excluded.
+            expect_ack: wait for and return the acknowledgment.
+            timeout_ms: ACK wait budget.
 
         Raises:
-            CommandRejectedError: la carte a répondu avec le bit d'erreur ou
-                un statut non nul.
+            CommandRejectedError: the card responded with the error bit or
+                a non-zero status.
         """
         data = protocol.build_frame(frame_type, payload)
         return self._send_raw(
@@ -566,24 +566,24 @@ class SoundBlasterG8Driver:
         )
 
     def _write(self, buf: bytes, recover: bool = True) -> bool:
-        """Écriture HID brute, verrouillée, avec détection de handle mort."""
+        """Raw HID write, locked, with dead-handle detection."""
         with self._io_lock:
             device = self._device
             if device is None:
                 return False
-            _log(f"-> {buf.hex()} ({len(buf)} octets)")
+            _log(f"-> {buf.hex()} ({len(buf)} bytes)")
             try:
                 written = device.write(buf)
             except OSError as exc:
-                self._invalidate_device(f"écriture HID impossible: {exc}")
+                self._invalidate_device(f"HID write failed: {exc}")
                 if recover:
                     self.reconnect()
                 return False
             except Exception as exc:
-                raise DeviceConnectionError(f"écriture HID impossible: {exc}") from exc
+                raise DeviceConnectionError(f"HID write failed: {exc}") from exc
 
         if written != len(buf) and self._debug:
-            _log(f"AVERTISSEMENT: {written} octet(s) écrit(s) sur {len(buf)}")
+            _log(f"WARNING: {written} byte(s) written out of {len(buf)}")
         return True
 
     def _wait_for(
@@ -593,12 +593,12 @@ class SoundBlasterG8Driver:
         timeout_ms: int,
         recover: bool,
     ) -> Optional[Frame]:
-        """Attend la réponse attendue, en ignorant les notifications parasites.
+        """Waits for the expected response, ignoring unrelated notifications.
 
-        ``expect="ack"``       : trame de type 0x02 dont ``ack_command`` vaut
-        ``frame_type`` (écritures).
-        ``expect="same_type"`` : trame du même type que la requête (lectures :
-        0x39 -> 0x39, 0x09 -> 0x09, 0x11 -> 0x11).
+        ``expect="ack"``       : type-0x02 frame whose ``ack_command`` is
+        ``frame_type`` (writes).
+        ``expect="same_type"`` : frame of the same type as the request
+        (reads: 0x39 -> 0x39, 0x09 -> 0x09, 0x11 -> 0x11).
         """
         deadline = time.monotonic() + timeout_ms / 1000.0
         while True:
@@ -614,14 +614,14 @@ class SoundBlasterG8Driver:
 
             if frame.is_error and frame.base_type in (protocol.NOTIF_ACK, frame_type):
                 raise CommandRejectedError(
-                    f"commande rejetée par la carte: {frame.describe()}"
+                    f"command rejected by the card: {frame.describe()}"
                 )
 
             if expect == "ack":
                 if frame.is_ack and frame.ack_command == frame_type:
                     if not frame.ack_ok:
                         raise CommandRejectedError(
-                            f"statut d'erreur {frame.ack_status}: {frame.describe()}"
+                            f"error status {frame.ack_status}: {frame.describe()}"
                         )
                     return frame
             elif expect == "same_type":
@@ -636,23 +636,24 @@ class SoundBlasterG8Driver:
         allow_legacy_retry: bool = True,
         recover: bool = True,
     ) -> Optional[Frame]:
-        """Envoie une trame et attend éventuellement la réponse associée.
+        """Sends a frame and optionally waits for the matching response.
 
-        Transport unique (voir ``protocol``) : ``b"\\x00" + pad_report(frame)``,
-        soit ``SET_REPORT wValue=0x0200 wLength=64``. Le premier octet est
-        consommé par hidapi comme report ID.
+        Single transport (see ``protocol``): ``b"\\x00" + pad_report(frame)``,
+        i.e. ``SET_REPORT wValue=0x0200 wLength=64``. The first byte is
+        consumed by hidapi as the report ID.
 
         Args:
-            frame: trame ``5a <type> <len> <payload>`` non paddée.
-            expect: ``"ack"`` (réponse de type 0x02), ``"same_type"`` (réponse
-                du même type que la requête) ou ``None`` (fire-and-forget).
-            allow_legacy_retry: en cas de time-out, retenter **une seule fois**
-                avec l'ancienne forme (trame nue de 8 octets, report ID 0x5A,
-                ``wValue=0x025A``). Garde-fou au cas où la carte se révélerait
-                plus stricte sur le Scout Mode que ce que montre la capture.
+            frame: unpadded ``5a <type> <len> <payload>`` frame.
+            expect: ``"ack"`` (type-0x02 response), ``"same_type"``
+                (response of the same type as the request), or ``None``
+                (fire-and-forget).
+            allow_legacy_retry: on timeout, retry **exactly once** with the
+                old form (bare 8-byte frame, report ID 0x5A,
+                ``wValue=0x025A``). Safety net in case the card turns out
+                to be stricter about Scout Mode than what the capture shows.
         """
         if not frame or frame[0] != protocol.MAGIC:
-            raise ValueError(f"trame invalide (magic attendu 0x5a): {bytes(frame).hex()}")
+            raise ValueError(f"invalid frame (expected magic 0x5a): {bytes(frame).hex()}")
         frame_type = frame[1]
 
         with self._io_lock:
@@ -660,12 +661,12 @@ class SoundBlasterG8Driver:
                 _log(f"[simulation] -> {bytes(frame).hex()}")
                 return None
 
-            # Purge : les notifications en attente fausseraient l'appariement.
-            # Si le handle est mort (reset USB non annoncé), la purge déclenche
-            # la reconnexion et l'écriture partira sur le nouveau handle.
+            # Purge: pending notifications would throw off the matching.
+            # If the handle is dead (unannounced USB reset), the purge
+            # triggers a reconnection and the write goes out on the new handle.
             self.poll(recover=recover)
             if self._device is None:
-                _log("Envoi impossible : plus de handle HID valide")
+                _log("Cannot send: no valid HID handle left")
                 return None
 
             report = bytes([protocol.REPORT_ID]) + protocol.pad_report(frame)
@@ -680,15 +681,15 @@ class SoundBlasterG8Driver:
                 return response
 
             if not allow_legacy_retry:
-                _log("Aucune réponse reçue (timeout)")
+                _log("No response received (timeout)")
                 return None
 
-            # Repli historique : trame nue, hidapi prend 0x5A comme report ID
-            # -> wValue=0x025A. Un seul essai, journalisé explicitement.
+            # Legacy fallback: bare frame, hidapi takes 0x5A as the report ID
+            # -> wValue=0x025A. A single attempt, explicitly logged.
             _log(
-                "Aucune réponse à la forme paddée 64 o (wValue=0x0200) : "
-                "un unique retry avec l'ancienne forme "
-                f"({len(frame)} o, report ID 0x{protocol.LEGACY_REPORT_ID:02x}, "
+                "No response to the 64 B padded form (wValue=0x0200): "
+                "a single retry with the old form "
+                f"({len(frame)} B, report ID 0x{protocol.LEGACY_REPORT_ID:02x}, "
                 "wValue=0x025a)"
             )
             if not self._write(bytes(frame), recover=recover):
@@ -696,21 +697,21 @@ class SoundBlasterG8Driver:
 
             response = self._wait_for(expect, frame_type, timeout_ms, recover)
             if response is None:
-                _log("Aucune réponse reçue (timeout, y compris après le retry)")
+                _log("No response received (timeout, even after the retry)")
             else:
                 _log(
-                    "ATTENTION: la carte n'accepte que l'ancienne forme "
-                    "(report ID 0x5a) - signalez-le, le transport unifié est "
-                    "censé fonctionner d'après la capture USB"
+                    "WARNING: the card only accepts the old form "
+                    "(report ID 0x5a) - please report this, the unified "
+                    "transport is supposed to work per the USB capture"
                 )
             return response
 
     # ------------------------------------------------------------------
-    # Fonctions génériques
+    # Generic functions
     # ------------------------------------------------------------------
 
     def set_feature_u16(self, feature: int, param: int, value: int) -> bool:
-        """Écrit un paramètre 16 bits et vérifie l'écho de l'ACK."""
+        """Writes a 16-bit parameter and checks the ACK's echo."""
         if self._device is None:
             _log(
                 f"[simulation] feature=0x{feature:02x} param=0x{param:04x} value={value}"
@@ -728,16 +729,16 @@ class SoundBlasterG8Driver:
 
         if ack.ack_feature != feature or ack.ack_param != param:
             _log(
-                "AVERTISSEMENT: l'ACK ne correspond pas à la commande "
-                f"(attendu 0x{feature:02x}/0x{param:04x}, "
-                f"reçu {ack.describe()})"
+                "WARNING: the ACK doesn't match the command "
+                f"(expected 0x{feature:02x}/0x{param:04x}, "
+                f"got {ack.describe()})"
             )
             return False
 
         if ack.ack_value is not None and ack.ack_value != value:
             _log(
-                f"AVERTISSEMENT: valeur appliquée {ack.ack_value} "
-                f"au lieu de {value}"
+                f"WARNING: applied value {ack.ack_value} "
+                f"instead of {value}"
             )
             return False
 
@@ -747,70 +748,70 @@ class SoundBlasterG8Driver:
         return self.set_feature_u16(feature, param, 1 if enabled else 0)
 
     def get_feature_cached(self, feature: int, param: int) -> Optional[int]:
-        """Dernière valeur connue d'un paramètre (via les ACK reçus)."""
+        """Last known value of a parameter (from received ACKs)."""
         self.poll()
         return self._state.features.get((feature, param))
 
     # ------------------------------------------------------------------
-    # Scout Mode (confirmé par la capture USB)
+    # Scout Mode (confirmed by the USB capture)
     # ------------------------------------------------------------------
 
     def set_scout_mode(self, enabled: bool) -> bool:
-        """Active/désactive le Scout Mode.
+        """Enables/disables Scout Mode.
 
-        Trame envoyée : ``5a 26 05 07 02 00 01 00`` (ON) /
-        ``5a 26 05 07 02 00 00 00`` (OFF), zéro-paddée à 64 octets.
+        Frame sent: ``5a 26 05 07 02 00 01 00`` (ON) /
+        ``5a 26 05 07 02 00 00 00`` (OFF), zero-padded to 64 bytes.
 
         Returns:
-            ``True`` si la carte a acquitté la commande.
+            ``True`` if the card acknowledged the command.
         """
-        action = "activation" if enabled else "désactivation"
-        _log(f"Scout Mode : {action}")
+        action = "enabling" if enabled else "disabling"
+        _log(f"Scout Mode: {action}")
         with self._io_lock:
             try:
                 ok = self.set_feature_bool(*protocol.SCOUT_MODE, enabled)
             except SoundBlasterG8Error as exc:
-                _log(f"ERREUR Scout Mode: {exc}")
+                _log(f"Scout Mode ERROR: {exc}")
                 return False
 
         if ok:
-            _log(f"Scout Mode {'activé' if enabled else 'désactivé'} (confirmé par la carte)")
+            _log(f"Scout Mode {'enabled' if enabled else 'disabled'} (confirmed by the card)")
         elif self._device is not None:
-            _log("Scout Mode : la carte n'a pas confirmé la commande")
+            _log("Scout Mode: the card did not confirm the command")
         return ok
 
     def get_scout_mode(self) -> Optional[bool]:
-        """État du Scout Mode d'après le dernier ACK reçu.
+        """Scout Mode state based on the last ACK received.
 
-        La commande de lecture n'a pas encore été identifiée dans le pcap :
-        on se base sur l'écho des commandes déjà envoyées. Retourne ``None``
-        si l'état est inconnu.
+        The read command hasn't been identified in the pcap yet: we rely
+        on the echo of commands already sent. Returns ``None`` if the
+        state is unknown.
         """
         value = self.get_feature_cached(*protocol.SCOUT_MODE)
         return None if value is None else bool(value)
 
     # ------------------------------------------------------------------
-    # Direct Mode (confirmé par la capture USB)
+    # Direct Mode (confirmed by the USB capture)
     # ------------------------------------------------------------------
 
     def set_direct_mode(self, enabled: bool) -> bool:
-        """Active/désactive le Direct Mode.
+        """Enables/disables Direct Mode.
 
-        Séquence complète (voir la chronologie dans ``protocol``) :
+        Full sequence (see the timeline in ``protocol``):
 
-        1. purge des notifications en attente ;
-        2. envoi de ``5a 39 03 00 05 <0|1>`` paddé à 64 octets ;
-        3. attente de l'ACK ``5a 02 0a 39 00 05 <0|1>`` (il arrive en ~0.2 ms,
-           budget 300 ms) avec vérification de l'écho param/valeur ;
-        4. drainage des notifications 0x1a et des dumps 0x11 qui suivent ;
-        5. la carte se réénumère (reset USB à +0.6 s) : :meth:`reconnect`.
+        1. purge pending notifications;
+        2. send ``5a 39 03 00 05 <0|1>`` padded to 64 bytes;
+        3. wait for the ACK ``5a 02 0a 39 00 05 <0|1>`` (arrives in ~0.2 ms,
+           300 ms budget) with param/value echo verification;
+        4. drain the 0x1a notifications and 0x11 dumps that follow;
+        5. the card re-enumerates (USB reset at +0.6 s): :meth:`reconnect`.
 
         Returns:
-            ``True`` seulement si l'ACK est correct **et** la reconnexion
-            validée par une sonde.
+            ``True`` only if the ACK is correct **and** the reconnection is
+            validated by a probe.
         """
-        action = "activation" if enabled else "désactivation"
-        _log(f"Direct Mode : {action}")
+        action = "enabling" if enabled else "disabling"
+        _log(f"Direct Mode: {action}")
 
         with self._io_lock:
             if self._device is None:
@@ -824,44 +825,44 @@ class SoundBlasterG8Driver:
                     timeout_ms=ACK_TIMEOUT_MS,
                 )
             except SoundBlasterG8Error as exc:
-                _log(f"ERREUR Direct Mode: {exc}")
+                _log(f"Direct Mode ERROR: {exc}")
                 return False
 
             if ack is None:
-                _log("Direct Mode : aucun ACK de la commande 0x39 (timeout)")
+                _log("Direct Mode: no ACK for the 0x39 command (timeout)")
                 return False
 
-            # L'ACK de 0x39 n'a pas le même layout que celui de 0x26.
+            # The 0x39 ACK doesn't have the same layout as the 0x26 one.
             expected = 1 if enabled else 0
             if ack.dm_ack_param != protocol.PARAM_DIRECT_MODE:
                 _log(
-                    "AVERTISSEMENT: l'ACK 0x39 ne référence pas le param "
+                    "WARNING: the 0x39 ACK doesn't reference param "
                     f"0x{protocol.PARAM_DIRECT_MODE:02x} ({ack.describe()})"
                 )
                 return False
             if ack.dm_ack_value != expected:
                 _log(
-                    f"AVERTISSEMENT: valeur appliquée {ack.dm_ack_value} "
-                    f"au lieu de {expected} ({ack.describe()})"
+                    f"WARNING: applied value {ack.dm_ack_value} "
+                    f"instead of {expected} ({ack.describe()})"
                 )
                 return False
 
-            _log("Direct Mode : commande acquittée, drainage des notifications...")
+            _log("Direct Mode: command acknowledged, draining notifications...")
             self._drain_toggle_notifications()
 
-            _log("Direct Mode : la carte se réénumère, reconnexion...")
+            _log("Direct Mode: the card is re-enumerating, reconnecting...")
             if not self.reconnect():
                 _log(
-                    "Direct Mode : commande acceptée mais la carte n'a pas pu "
-                    "être rouverte après le reset USB"
+                    "Direct Mode: command accepted but the card could not "
+                    "be reopened after the USB reset"
                 )
                 return False
 
-            _log(f"Direct Mode {'activé' if enabled else 'désactivé'} (confirmé)")
+            _log(f"Direct Mode {'enabled' if enabled else 'disabled'} (confirmed)")
             return True
 
     def _drain_toggle_notifications(self) -> None:
-        """Absorbe les 0x1a / 0x11 émis en rafale après une bascule du 0x39."""
+        """Absorbs the 0x1a / 0x11 frames emitted in a burst after a 0x39 toggle."""
         deadline = time.monotonic() + TOGGLE_DRAIN_S
         while time.monotonic() < deadline:
             frames = self.poll(timeout_ms=20, max_frames=8)
@@ -869,14 +870,14 @@ class SoundBlasterG8Driver:
                 break
 
     def get_direct_mode(self) -> Optional[bool]:
-        """Interroge la carte sur l'état du Direct Mode.
+        """Queries the card for Direct Mode's state.
 
-        Requête ``5a 39 05 01 20 00 00 00`` -> réponse de type 0x39
-        ``5a 39 05 01 <bits> 40 00 00`` ; le bit 0x20 du 2e octet de payload
-        indique que le Direct Mode est actif.
+        Request ``5a 39 05 01 20 00 00 00`` -> type-0x39 response
+        ``5a 39 05 01 <bits> 40 00 00``; bit 0x20 of the 2nd payload byte
+        indicates Direct Mode is active.
 
         Returns:
-            ``None`` si la carte n'est pas connectée ou ne répond pas.
+            ``None`` if the card isn't connected or doesn't respond.
         """
         with self._io_lock:
             if self._device is None:
@@ -888,77 +889,77 @@ class SoundBlasterG8Driver:
                     timeout_ms=ACK_TIMEOUT_MS,
                 )
             except SoundBlasterG8Error as exc:
-                _log(f"Lecture du Direct Mode impossible: {exc}")
+                _log(f"Unable to read Direct Mode: {exc}")
                 return None
 
         if frame is None:
-            _log("Lecture du Direct Mode : aucune réponse")
+            _log("Direct Mode read: no response")
             return None
         return frame.direct_mode_enabled
 
     # ------------------------------------------------------------------
-    # Mode sonore / égaliseur (confirmé par les captures « Sound Mode »)
+    # Sound mode / equalizer (confirmed by the "Sound Mode" captures)
     # ------------------------------------------------------------------
 
     def set_sound_mode_param(self, param: int, value: float) -> bool:
-        """Envoie une écriture CMD_SET_FLOAT unique et vérifie l'ACK."""
+        """Sends a single CMD_SET_FLOAT write and checks the ACK."""
         if self._device is None:
             _log(f"[simulation] SET_FLOAT param=0x{param:02x} value={value}")
             return False
 
         try:
-            # build_set_float() retourne une trame déjà complète (comme
-            # build_direct_mode()) : passer par _send_raw directement, pas
-            # par send_frame() qui re-wrapperait le payload dans une trame.
+            # build_set_float() returns an already-complete frame (like
+            # build_direct_mode()): go through _send_raw directly, not
+            # send_frame() which would re-wrap the payload in a frame.
             ack = self._send_raw(protocol.build_set_float(param, value), expect="ack")
         except SoundBlasterG8Error as exc:
-            _log(f"ERREUR SET_FLOAT param=0x{param:02x}: {exc}")
+            _log(f"SET_FLOAT ERROR param=0x{param:02x}: {exc}")
             return False
 
         if ack is None or ack.ack_command != protocol.CMD_SET_FLOAT or not ack.ack_ok:
             _log(
-                f"AVERTISSEMENT: pas d'ACK valide pour param=0x{param:02x} "
+                f"WARNING: no valid ACK for param=0x{param:02x} "
                 f"({ack.describe() if ack else 'timeout'})"
             )
             return False
         return True
 
     def set_sound_mode(self, writes: list[tuple[int, float]]) -> bool:
-        """Rejoue une séquence d'écritures CMD_SET_FLOAT (un mode sonore).
+        """Replays a sequence of CMD_SET_FLOAT writes (a sound mode).
 
-        L'ordre de la séquence est celui de la capture USB d'origine (voir
-        :mod:`soundblaster_g8.sound_modes`) : il doit être préservé tel quel.
-        Contrairement au Direct Mode, ces écritures ne provoquent pas de reset
-        USB de la carte.
+        The sequence order is that of the original USB capture (see
+        :mod:`soundblaster_g8.sound_modes`): it must be preserved as-is.
+        Unlike Direct Mode, these writes don't trigger a USB reset of the
+        card.
 
         Returns:
-            ``True`` seulement si **toutes** les écritures ont été acquittées.
+            ``True`` only if **all** writes were acknowledged.
         """
-        _log(f"Mode sonore : envoi de {len(writes)} paramètre(s)")
+        _log(f"Sound mode: sending {len(writes)} parameter(s)")
         with self._io_lock:
             all_ok = True
             for param, value in writes:
                 if not self.set_sound_mode_param(param, value):
                     all_ok = False
-            _log(f"Mode sonore {'appliqué' if all_ok else 'partiellement appliqué'}")
+            _log(f"Sound mode {'applied' if all_ok else 'partially applied'}")
             return all_ok
 
     def eq_set_band(self, index: int, value: float) -> bool:
-        """Écrit une bande EQ isolée (même mécanisme que :meth:`set_sound_mode`).
+        """Writes a single EQ band (same mechanism as :meth:`set_sound_mode`).
 
-        Une bande n'est qu'un paramètre `CMD_SET_FLOAT` de plus : le param id
-        est `protocol.EQ_BAND_PARAMS[index]` (0x0b..0x14).
+        A band is just one more `CMD_SET_FLOAT` parameter: the param id is
+        `protocol.EQ_BAND_PARAMS[index]` (0x0b..0x14).
         """
         if not 0 <= index < len(protocol.EQ_BAND_PARAMS):
-            raise ValueError(f"index de bande hors limites: {index}")
+            raise ValueError(f"band index out of range: {index}")
         return self.set_sound_mode_param(protocol.EQ_BAND_PARAMS[index], value)
 
     def eq_get_all_bands(self) -> Optional[list[float]]:
-        """Dernières valeurs connues des 10 bandes (via le cache de notifications).
+        """Last known values of the 10 bands (from the notification cache).
 
-        Comme pour :meth:`get_feature_cached`, la carte n'a pas de commande de
-        lecture dédiée : on se base sur les dumps ``PARAMS`` reçus après une
-        écriture. Retourne ``None`` tant qu'une bande n'a jamais été observée.
+        As with :meth:`get_feature_cached`, the card has no dedicated read
+        command: we rely on the ``PARAMS`` dumps received after a write.
+        Returns ``None`` as long as a band has never been observed.
         """
         self.poll()
         bands: list[float] = []
@@ -970,23 +971,23 @@ class SoundBlasterG8Driver:
         return bands
 
     def eq_set_preamp(self, value: float) -> bool:
-        """Écrit le Préampli (param 0x0a), même mécanisme que :meth:`eq_set_band`."""
+        """Writes the Preamp (param 0x0a), same mechanism as :meth:`eq_set_band`."""
         return self.set_sound_mode_param(protocol.PARAM_PREAMP, value)
 
     def eq_get_preamp(self) -> Optional[float]:
-        """Dernière valeur connue du Préampli (même limite que :meth:`eq_get_all_bands`)."""
+        """Last known Preamp value (same limitation as :meth:`eq_get_all_bands`)."""
         self.poll()
         return self._state.params.get(protocol.PARAM_PREAMP)
 
     # ------------------------------------------------------------------
-    # Fonctions non encore reversées
+    # Not yet reverse-engineered functions
     # ------------------------------------------------------------------
 
     def _unsupported(self, name: str) -> bool:
         _log(
-            f"'{name}' n'est pas encore implémenté : la trame USB correspondante "
-            "n'a pas été capturée. Utilisez 'python tools/g8_probe.py --monitor' "
-            "pendant que l'application Creative modifie ce réglage."
+            f"'{name}' is not implemented yet: the corresponding USB frame "
+            "hasn't been captured. Use 'python tools/g8_probe.py --monitor' "
+            "while the Creative application changes this setting."
         )
         return False
 
@@ -997,10 +998,10 @@ class SoundBlasterG8Driver:
         return None
 
     def eq_load_preset(self, preset_name: str) -> bool:
-        return self._unsupported(f"Preset EQ '{preset_name}'")
+        return self._unsupported(f"EQ preset '{preset_name}'")
 
     def eq_save_preset(self, preset_name: str) -> bool:
-        return self._unsupported(f"Sauvegarde du preset EQ '{preset_name}'")
+        return self._unsupported(f"Saving EQ preset '{preset_name}'")
 
     # ------------------------------------------------------------------
     # Context manager
@@ -1014,12 +1015,12 @@ class SoundBlasterG8Driver:
         self.disconnect()
 
 
-# Instance singleton
+# Singleton instance
 _driver_instance: Optional[SoundBlasterG8Driver] = None
 
 
 def get_driver(debug: bool = False) -> SoundBlasterG8Driver:
-    """Retourne l'instance singleton du driver."""
+    """Returns the driver's singleton instance."""
     global _driver_instance
     if _driver_instance is None:
         _driver_instance = SoundBlasterG8Driver(debug=debug)
