@@ -43,7 +43,7 @@ card_present() {
 
 # --- Install ---
 
-install() {
+do_install() {
     check_deps
 
     SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -108,6 +108,6 @@ case "${1:-}" in
         echo "mixer defaults for the Sound Blaster G8 whenever it's plugged in."
         ;;
     *)
-        install
+        do_install
         ;;
 esac

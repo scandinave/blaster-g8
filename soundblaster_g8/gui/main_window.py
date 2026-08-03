@@ -40,12 +40,14 @@ class MainWindow(tk.Tk):
 
     def __init__(self):
         """Initializes the main window."""
-        super().__init__()
+        super().__init__(baseName="blaster-g8", className="blaster-g8")
 
         i18n.load_saved_language()
 
         self.title(i18n._("Sound Blaster G8 - Control"))
         self.resizable(True, True)
+        self._app_icon_image = tk.PhotoImage(file=str(ASSETS_DIR / "icon.png"))
+        self.iconphoto(True, self._app_icon_image)
 
         # Controller singleton
         self._controller: Optional[SoundBlasterController] = None
