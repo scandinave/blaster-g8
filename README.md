@@ -144,6 +144,22 @@ python tools/g8_probe.py --list-sound-modes  # lists the available sound modes
 python tools/g8_probe.py --sound-mode esport --debug  # applies a sound mode
 ```
 
+## Building a standalone binary
+
+A one-file executable (no Python install required on the target machine) can
+be produced with [PyInstaller](https://pyinstaller.org/):
+
+```bash
+pip install .[build]
+python tools/compile_translations.py   # .mo files are gitignored build artifacts
+pyinstaller soundblaster-g8.spec
+```
+
+The binary is written to `dist/soundblaster-g8`. `soundblaster-g8.spec`
+bundles the GUI assets (`soundblaster_g8/gui/assets/`) and the compiled
+translations (`soundblaster_g8/locale/`), and declares `hid`/`hidraw` as
+hidden imports since `hidbackend.py` selects between them at runtime.
+
 ## USB protocol (reverse-engineered)
 
 The card (VID `041e` / PID `329b`) exposes two HID interfaces:

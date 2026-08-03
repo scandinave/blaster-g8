@@ -12,6 +12,7 @@ dependencies = ["hidapi>=0.10.0"]
 
 [project.optional-dependencies]
 hid = ["hidapi>=0.10.0"]
+build = ["pyinstaller>=6.0"]
 
 [project.scripts]
 soundblaster-g8 = "main:main"
