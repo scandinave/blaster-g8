@@ -5,3 +5,14 @@ __pycache__
 soundblaster_g8.egg-info
 .venv
 soundblaster_g8/locale/*/LC_MESSAGES/*.mo
+
+# dpkg-buildpackage artifacts
+.pybuild/
+debian/.debhelper/
+debian/soundblaster-g8/
+debian/soundblaster-g8-*/
+debian/debhelper-build-stamp
+debian/files
+debian/*.debhelper
+debian/*.debhelper.log
+debian/*.substvars

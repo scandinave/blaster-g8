@@ -1,0 +1,24 @@
+Source: soundblaster-g8
+Section: python
+Priority: optional
+Maintainer: Romain LE BARO <romain.lebaro@protonmail.com>
+Build-Depends: debhelper-compat (= 13),
+               dh-python,
+               pybuild-plugin-pyproject,
+               python3-all,
+               python3-setuptools,
+               gettext
+Standards-Version: 4.6.2
+Rules-Requires-Root: no
+
+Package: soundblaster-g8
+Architecture: all
+Depends: ${python3:Depends}, ${misc:Depends}, python3-hid, python3-tk
+Recommends: alsa-utils
+Description: Control application for the Creative Sound Blaster G8
+ Graphical control application for the Creative Sound Blaster G8 USB
+ sound card: Scout Mode, Direct Mode, sound mode presets, 10-band
+ equalizer and preamp, bass/treble.
+ .
+ Installs a udev rule granting unprivileged access to the card's HID
+ control interface.

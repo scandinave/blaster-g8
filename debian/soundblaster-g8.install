@@ -1,0 +1,2 @@
+packaging/soundblaster-g8.desktop usr/share/applications
+udev/99-soundblaster-g8.rules usr/lib/udev/rules.d

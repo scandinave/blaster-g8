@@ -1,0 +1,16 @@
+#!/usr/bin/make -f
+
+export PYBUILD_NAME=soundblaster-g8
+export PATH := /usr/bin:$(PATH)
+
+%:
+	dh $@ --with python3 --buildsystem=pybuild
+
+override_dh_auto_build:
+	python3 tools/compile_translations.py
+	dh_auto_build
+
+override_dh_install:
+	dh_install
+	install -D -m 0644 soundblaster_g8/gui/assets/icon.png \
+		debian/soundblaster-g8/usr/share/icons/hicolor/512x512/apps/soundblaster-g8.png

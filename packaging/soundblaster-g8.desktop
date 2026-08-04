@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Sound Blaster G8 Control
+Comment=Application de contrôle pour Creative Sound Blaster G8
+Exec=soundblaster-g8
+Icon=soundblaster-g8
+Terminal=false
+Categories=AudioVideo;Audio;Settings;
+StartupWMClass=soundblaster-g8

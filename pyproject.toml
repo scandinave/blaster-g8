@@ -15,7 +15,10 @@ hid = ["hidapi>=0.10.0"]
 build = ["pyinstaller>=6.0"]
 
 [project.scripts]
-soundblaster-g8 = "main:main"
+soundblaster-g8 = "soundblaster_g8.__main__:main"
 
 [tool.setuptools.packages.find]
 include = ["soundblaster_g8*"]
+
+[tool.setuptools.package-data]
+soundblaster_g8 = ["gui/assets/*.png", "locale/*/LC_MESSAGES/*.mo"]
