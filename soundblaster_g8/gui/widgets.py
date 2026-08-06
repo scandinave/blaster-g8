@@ -367,13 +367,201 @@ class RoundedButton(tk.Canvas):
             self.create_text(width / 2, height / 2, text=self._text, fill=fg, font=self._font)
 
 
+class _DropdownPopup:
+    """Scrollable dropdown for ``SplitSelect``: a borderless ``Toplevel``
+    with a ``Canvas``+``Scrollbar`` list, built fresh on every ``open()``
+    and fully destroyed on ``close()`` - no widget reuse across opens, so
+    nothing can leak.
+    """
+
+    ROW_HEIGHT = 32
+    MAX_VISIBLE_ROWS = 8
+    SCROLLBAR_W = 16
+    MAX_POPUP_W = 420
+
+    def __init__(self, owner: "SplitSelect"):
+        self._owner = owner
+        self._toplevel: Optional[tk.Toplevel] = None
+        self._canvas: Optional[tk.Canvas] = None
+        self._row_frames: list[tk.Frame] = []
+        self._row_labels: list[tk.Label] = []
+        self._active_index: int = -1
+        self._root_click_id: Optional[str] = None
+
+    def is_open(self) -> bool:
+        return self._toplevel is not None
+
+    def toggle(self) -> None:
+        self.close() if self.is_open() else self.open()
+
+    def open(self) -> None:
+        owner = self._owner
+        values = owner._values
+        if not values:
+            return
+        self.close()  # defensive, should already be closed
+
+        n = len(values)
+        visible = min(n, self.MAX_VISIBLE_ROWS)
+        show_scrollbar = n > self.MAX_VISIBLE_ROWS
+        content_w = min(
+            self.MAX_POPUP_W,
+            max(owner._width, SplitSelect.compute_width(values, font=owner._font, min_width=owner._width)),
+        )
+        if show_scrollbar:
+            content_w -= self.SCROLLBAR_W
+        content_h = visible * self.ROW_HEIGHT
+
+        top = tk.Toplevel(owner)
+        top.withdraw()
+        top.overrideredirect(True)
+        top.transient(owner.winfo_toplevel())
+        top.configure(bg=theme.BORDER_CARD)
+
+        frame = tk.Frame(top, bg=theme.BORDER_CARD, bd=1)
+        frame.pack(fill="both", expand=True)
+
+        canvas = tk.Canvas(frame, width=content_w, height=content_h, bg=theme.BG_CONTROL, highlightthickness=0, bd=0)
+        canvas.grid(row=0, column=0, sticky="nsew")
+        if show_scrollbar:
+            sb = tk.Scrollbar(frame, orient="vertical", command=canvas.yview)
+            sb.grid(row=0, column=1, sticky="ns")
+            canvas.configure(yscrollcommand=sb.set)
+        canvas.configure(yscrollincrement=self.ROW_HEIGHT)
+
+        inner = tk.Frame(canvas, bg=theme.BG_CONTROL)
+        canvas.create_window((0, 0), window=inner, anchor="nw", width=content_w)
+
+        self._row_frames, self._row_labels = [], []
+        for i, label_text in enumerate(values):
+            rf = tk.Frame(inner, bg=theme.BG_CONTROL, height=self.ROW_HEIGHT)
+            rf.pack(fill="x")
+            rf.pack_propagate(False)
+            lbl = tk.Label(
+                rf, text=label_text, bg=theme.BG_CONTROL, fg=theme.FG_PRIMARY, font=owner._font, anchor="w", padx=12,
+            )
+            lbl.pack(fill="both", expand=True)
+            lbl.bind("<Enter>", lambda e, idx=i: self._set_active(idx))
+            lbl.bind("<Leave>", lambda e, idx=i: self._clear_active(idx))
+            lbl.bind("<Button-1>", lambda e, idx=i: self._pick(idx))
+            self._row_frames.append(rf)
+            self._row_labels.append(lbl)
+
+        inner.update_idletasks()
+        canvas.configure(scrollregion=(0, 0, content_w, n * self.ROW_HEIGHT))
+
+        # Position under the field; flip above if it would overflow the
+        # bottom of the screen, clamp horizontally to stay on-screen.
+        x = owner.winfo_rootx()
+        y = owner.winfo_rooty() + owner.winfo_height()
+        total_h = content_h + 2  # + 1px border each side
+        screen_h, screen_w = owner.winfo_screenheight(), owner.winfo_screenwidth()
+        if y + total_h > screen_h and owner.winfo_rooty() - total_h >= 0:
+            y = owner.winfo_rooty() - total_h
+        x = max(0, min(x, screen_w - content_w))
+        popup_total_w = content_w + (self.SCROLLBAR_W if show_scrollbar else 0) + 2
+        top.geometry(f"{popup_total_w}x{total_h}+{x}+{y}")
+        top.deiconify()
+        top.lift()
+        top.focus_set()
+
+        top.bind("<Escape>", lambda e: self.close())
+        top.bind("<Button-4>", lambda e: canvas.yview_scroll(-1, "units"))
+        top.bind("<Button-5>", lambda e: canvas.yview_scroll(1, "units"))
+        top.bind("<MouseWheel>", lambda e: canvas.yview_scroll(-1 if e.delta > 0 else 1, "units"))
+        top.bind("<Up>", lambda e: self._move_active(-1))
+        top.bind("<Down>", lambda e: self._move_active(1))
+        top.bind("<Return>", lambda e: self._pick(self._active_index))
+
+        # Click-outside-to-close: bound on the containing toplevel (not
+        # bind_all, which would clobber other code's app-wide bindings on
+        # unbind). Every descendant widget's bindtags include its
+        # containing toplevel, so any Button-1 elsewhere in the window
+        # bubbles up here regardless of window manager. Deferred to the
+        # next idle tick: binding it synchronously here would let the very
+        # click that opened the popup also reach this handler within the
+        # same event dispatch (widget tag -> ... -> toplevel tag), closing
+        # the popup it just opened.
+        root = owner.winfo_toplevel()
+        root.after_idle(self._bind_root_click, root)
+
+        self._toplevel, self._canvas = top, canvas
+        self._active_index = -1
+        if 0 <= owner._index < n:
+            self._set_active(owner._index)
+            self._scroll_into_view(owner._index)
+
+    def _bind_root_click(self, root: tk.Misc) -> None:
+        if not self.is_open():
+            return  # closed again before the deferred bind ran
+        self._root_click_id = root.bind("<Button-1>", self._on_root_click, add="+")
+
+    def close(self) -> None:
+        if self._toplevel is None:
+            return
+        if self._root_click_id is not None:
+            self._owner.winfo_toplevel().unbind("<Button-1>", self._root_click_id)
+            self._root_click_id = None
+        self._toplevel.destroy()
+        self._toplevel = self._canvas = None
+        self._row_frames, self._row_labels = [], []
+        self._active_index = -1
+
+    def _on_root_click(self, _event) -> None:
+        # Fires after any widget-specific handler (e.g. SplitSelect's own
+        # Button-1 toggle), so by the time we get here the popup is either
+        # already legitimately re-opened/closed or this really is an
+        # "outside" click.
+        if self.is_open():
+            self.close()
+
+    def _set_active(self, idx: int) -> None:
+        self._clear_active(self._active_index)
+        self._active_index = idx
+        if 0 <= idx < len(self._row_labels):
+            self._row_frames[idx].configure(bg=theme.ACCENT)
+            self._row_labels[idx].configure(bg=theme.ACCENT)
+
+    def _clear_active(self, idx: int) -> None:
+        if 0 <= idx < len(self._row_labels):
+            self._row_frames[idx].configure(bg=theme.BG_CONTROL)
+            self._row_labels[idx].configure(bg=theme.BG_CONTROL)
+
+    def _move_active(self, delta: int) -> None:
+        n = len(self._row_labels)
+        if n == 0:
+            return
+        new_idx = max(0, min(n - 1, (self._active_index if self._active_index >= 0 else 0) + delta))
+        self._set_active(new_idx)
+        self._scroll_into_view(new_idx)
+
+    def _scroll_into_view(self, idx: int) -> None:
+        canvas = self._canvas
+        total_h = len(self._row_labels) * self.ROW_HEIGHT
+        view_h = canvas.winfo_height()
+        row_top, row_bottom = idx * self.ROW_HEIGHT, (idx + 1) * self.ROW_HEIGHT
+        view_top = canvas.canvasy(0)
+        if row_top < view_top:
+            canvas.yview_moveto(row_top / total_h)
+        elif row_bottom > view_top + view_h:
+            canvas.yview_moveto((row_bottom - view_h) / total_h)
+
+    def _pick(self, idx: int) -> None:
+        if idx < 0:
+            return
+        self._owner._select(idx)
+        self.close()
+
+
 class SplitSelect(tk.Canvas):
     """Mockup-style selector: text field + attached blue chevron button.
 
     Replaces the Sound Mode's ``ttk.Combobox``: same semantics (list of
     labels, selection by index) but rendered to match the design (dark
-    track + rounded blue cap on the right). The dropdown menu is built on
-    ``tk.Menu`` (native to the platform).
+    track + rounded blue cap on the right). The dropdown is a custom
+    scrollable popup (see ``_DropdownPopup``), since ``tk.Menu`` has no
+    scrolling support and long lists (e.g. the 51 sound modes) would
+    otherwise overflow the screen.
     """
 
     HEIGHT = 44
@@ -395,34 +583,30 @@ class SplitSelect(tk.Canvas):
         self._index = 0 if self._values else -1
         self._font = font
         self._enabled = True
-        self._menu = tk.Menu(
-            self, tearoff=0, bg=theme.BG_CONTROL, fg=theme.FG_PRIMARY,
-            activebackground=theme.ACCENT, activeforeground=theme.FG_PRIMARY, bd=0,
-        )
-        self._build_menu()
+        self._popup = _DropdownPopup(self)
 
-        self.bind("<Button-1>", self._open_menu)
+        self.bind("<Button-1>", self._open_dropdown)
         self.bind("<Configure>", self._on_configure)
+        self.bind("<Destroy>", lambda e: self._popup.close())
         self._redraw()
 
-    def _build_menu(self) -> None:
-        self._menu.delete(0, "end")
-        for i, label in enumerate(self._values):
-            self._menu.add_command(label=label, command=lambda idx=i: self._select(idx))
+    @classmethod
+    def compute_width(cls, values: Sequence[str], font=theme.FONT_SMALL, min_width: int = 90, slack: int = 8) -> int:
+        """Minimum width (px) that won't truncate any of ``values`` under
+        ``_redraw``'s ellipsis logic, i.e. ``width - ARROW_W - 24 >=
+        measure(label)`` for every label."""
+        f = tkfont.Font(font=font)
+        max_text_w = max((f.measure(v) for v in values), default=0)
+        return max(min_width, max_text_w + cls.ARROW_W + 24 + slack)
 
     def _on_configure(self, event: tk.Event) -> None:
         self._width = event.width
         self._redraw()
 
-    def _open_menu(self, _event: tk.Event) -> None:
+    def _open_dropdown(self, _event: tk.Event) -> None:
         if not self._enabled or not self._values:
             return
-        x = self.winfo_rootx()
-        y = self.winfo_rooty() + self.winfo_height()
-        try:
-            self._menu.tk_popup(x, y)
-        finally:
-            self._menu.grab_release()
+        self._popup.toggle()
 
     def _select(self, index: int) -> None:
         self.set_index(index)
@@ -430,8 +614,8 @@ class SplitSelect(tk.Canvas):
             self._command(index)
 
     def set_values(self, values: Sequence[str]) -> None:
+        self._popup.close()
         self._values = list(values)
-        self._build_menu()
         if self._index >= len(self._values):
             self._index = len(self._values) - 1
         self._redraw()
@@ -446,6 +630,8 @@ class SplitSelect(tk.Canvas):
 
     def set_enabled(self, enabled: bool) -> None:
         self._enabled = enabled
+        if not enabled:
+            self._popup.close()
         self.config(cursor="hand2" if enabled else "arrow")
         self._redraw()
 

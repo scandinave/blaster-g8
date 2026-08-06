@@ -158,9 +158,10 @@ class MainWindow(tk.Tk):
         languages = i18n.available_languages()
         self._lang_codes = [code for code, _name in languages]
         lang_names = [name for _code, name in languages]
+        lang_width = widgets.SplitSelect.compute_width(lang_names, font=theme.FONT_SMALL)
         self._lang_select = widgets.SplitSelect(
             header, values=lang_names, command=self._on_language_change,
-            bg=theme.BG_WINDOW, width=90, font=theme.FONT_SMALL,
+            bg=theme.BG_WINDOW, width=lang_width, font=theme.FONT_SMALL,
         )
         self._lang_select.place(relx=1.0, rely=0.5, anchor="e", x=-16)
         if i18n.get_language() in self._lang_codes:
