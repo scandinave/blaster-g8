@@ -339,7 +339,10 @@ class SoundBlasterG8Driver:
             "usage_page": self._device_info.get("usage_page"),
             "product_string": self._device_info.get("product_string"),
             "serial_number": self._device_info.get("serial_number") or self._serial_number,
-            "known_params": {f"0x{k:02x}": v for k, v in self._state.params.items()},
+            "known_params": {
+                f"0x{marker:02x}:0x{param:02x}": v
+                for (marker, param), v in self._state.params.items()
+            },
             "known_features": {
                 f"0x{f:02x}/0x{p:04x}": v for (f, p), v in self._state.features.items()
             },
@@ -964,7 +967,7 @@ class SoundBlasterG8Driver:
         self.poll()
         bands: list[float] = []
         for param in protocol.EQ_BAND_PARAMS:
-            value = self._state.params.get(param)
+            value = self._state.params.get((protocol.TLV_FLOAT, param))
             if value is None:
                 return None
             bands.append(value)
@@ -977,7 +980,73 @@ class SoundBlasterG8Driver:
     def eq_get_preamp(self) -> Optional[float]:
         """Last known Preamp value (same limitation as :meth:`eq_get_all_bands`)."""
         self.poll()
-        return self._state.params.get(protocol.PARAM_PREAMP)
+        return self._state.params.get((protocol.TLV_FLOAT, protocol.PARAM_PREAMP))
+
+    # ------------------------------------------------------------------
+    # CrystalVoice (confirmed by the CrystalVoice-*.pcapng captures)
+    # ------------------------------------------------------------------
+
+    def set_crystalvoice_param(self, param: int, value: float) -> bool:
+        """Sends a single CrystalVoice CMD_SET_FLOAT write and checks the ACK.
+
+        Same mechanism as :meth:`set_sound_mode_param`, but with the
+        TLV_CRYSTALVOICE marker (0x95) instead of TLV_FLOAT (0x96).
+        """
+        if self._device is None:
+            _log(f"[simulation] CV SET_FLOAT param=0x{param:02x} value={value}")
+            return False
+
+        try:
+            ack = self._send_raw(
+                protocol.build_set_crystalvoice_float(param, value), expect="ack"
+            )
+        except SoundBlasterG8Error as exc:
+            _log(f"CV SET_FLOAT ERROR param=0x{param:02x}: {exc}")
+            return False
+
+        if ack is None or ack.ack_command != protocol.CMD_SET_FLOAT or not ack.ack_ok:
+            _log(
+                f"WARNING: no valid ACK for CV param=0x{param:02x} "
+                f"({ack.describe() if ack else 'timeout'})"
+            )
+            return False
+        return True
+
+    def get_crystalvoice_param(self, param: int) -> Optional[float]:
+        """Last known value of a CrystalVoice parameter (from the notification cache)."""
+        self.poll()
+        return self._state.params.get((protocol.TLV_CRYSTALVOICE, param))
+
+    def set_crystalvoice_noise_reduction(self, enabled: bool) -> bool:
+        return self.set_crystalvoice_param(
+            protocol.PARAM_CV_NOISE_REDUCTION_ENABLED, 1.0 if enabled else 0.0
+        )
+
+    def get_crystalvoice_noise_reduction(self) -> Optional[bool]:
+        value = self.get_crystalvoice_param(protocol.PARAM_CV_NOISE_REDUCTION_ENABLED)
+        return None if value is None else bool(value)
+
+    def set_crystalvoice_noise_reduction_level(self, value: float) -> bool:
+        return self.set_crystalvoice_param(protocol.PARAM_CV_NOISE_REDUCTION_LEVEL, value)
+
+    def get_crystalvoice_noise_reduction_level(self) -> Optional[float]:
+        return self.get_crystalvoice_param(protocol.PARAM_CV_NOISE_REDUCTION_LEVEL)
+
+    def set_crystalvoice_echo_cancellation(self, enabled: bool) -> bool:
+        return self.set_crystalvoice_param(
+            protocol.PARAM_CV_ECHO_CANCELLATION, 1.0 if enabled else 0.0
+        )
+
+    def get_crystalvoice_echo_cancellation(self) -> Optional[bool]:
+        value = self.get_crystalvoice_param(protocol.PARAM_CV_ECHO_CANCELLATION)
+        return None if value is None else bool(value)
+
+    def set_crystalvoice_smart_volume(self, enabled: bool) -> bool:
+        return self.set_crystalvoice_param(protocol.PARAM_CV_SMART_VOICE, 1.0 if enabled else 0.0)
+
+    def get_crystalvoice_smart_volume(self) -> Optional[bool]:
+        value = self.get_crystalvoice_param(protocol.PARAM_CV_SMART_VOICE)
+        return None if value is None else bool(value)
 
     # ------------------------------------------------------------------
     # Not yet reverse-engineered functions
@@ -990,12 +1059,6 @@ class SoundBlasterG8Driver:
             "while the Creative application changes this setting."
         )
         return False
-
-    def set_crystalvoice(self, enabled: bool) -> bool:
-        return self._unsupported("CrystalVoice")
-
-    def get_crystalvoice(self) -> Optional[bool]:
-        return None
 
     def eq_load_preset(self, preset_name: str) -> bool:
         return self._unsupported(f"EQ preset '{preset_name}'")

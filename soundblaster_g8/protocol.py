@@ -195,6 +195,12 @@ NOTIF_STATE_CHANGED = 0x1A  # "a setting changed", emitted in a burst after 0x39
 # Marker for a TLV entry in a parameter dump
 TLV_FLOAT = 0x96
 
+#: Marker for CrystalVoice float parameters (distinct namespace from
+#: TLV_FLOAT: EQ/sound-mode and CrystalVoice params reuse the same numeric
+#: ids, e.g. param 0x00, so the marker is what disambiguates them - see
+#: CrystalVoice-*.pcapng captures).
+TLV_CRYSTALVOICE = 0x95
+
 # ACK statuses
 STATUS_OK = 0x00
 
@@ -220,6 +226,13 @@ PARAM_MASTER_GAIN = 0x01  # master gain/compensation
 PARAM_EQ_ENABLED = 0x09  # equalizer on/off (0/1)
 PARAM_PREAMP = 0x0A  # Preamp (input gain, in dB)
 EQ_BAND_PARAMS = tuple(range(0x0B, 0x15))  # the 10 bands, in dB
+
+# CrystalVoice - parameter identifiers extracted from the
+# CrystalVoice-*.pcapng captures (CMD_SET_FLOAT, marker TLV_CRYSTALVOICE).
+PARAM_CV_ECHO_CANCELLATION = 0x00  # Acoustic Echo Cancellation on/off
+PARAM_CV_NOISE_REDUCTION_ENABLED = 0x04  # Noise Reduction on/off
+PARAM_CV_NOISE_REDUCTION_LEVEL = 0x05  # Noise Reduction level, 0.0-1.0
+PARAM_CV_SMART_VOICE = 0x2C  # Smart Volume on/off
 
 #: Constant prefix observed in every SET FLOAT write.
 SET_FLOAT_PREFIX = 0x01
@@ -392,7 +405,10 @@ class Frame:
 class DecodedState:
     """State cache fed by the received notifications."""
 
-    params: dict[int, float] = field(default_factory=dict)
+    #: Keyed by (TLV marker, param id): EQ/sound-mode params (TLV_FLOAT) and
+    #: CrystalVoice params (TLV_CRYSTALVOICE) reuse the same numeric ids, so
+    #: the marker must be part of the key to avoid mixing the two features.
+    params: dict[tuple[int, int], float] = field(default_factory=dict)
     features: dict[tuple[int, int], int] = field(default_factory=dict)
 
     def apply(self, frame: Frame) -> None:
@@ -400,7 +416,7 @@ class DecodedState:
             return
         if frame.is_params:
             for entry in frame.params:
-                self.params[entry.param_id] = entry.as_float
+                self.params[(entry.kind, entry.param_id)] = entry.as_float
         elif frame.is_ack and frame.ack_ok:
             if frame.ack_command == CMD_DIRECT_MODE:
                 param, value = frame.dm_ack_param, frame.dm_ack_value
@@ -483,7 +499,7 @@ def build_direct_mode(enabled: bool) -> bytes:
     return build_frame(CMD_DIRECT_MODE, payload)
 
 
-def build_set_float(param: int, value: float) -> bytes:
+def build_set_float(param: int, value: float, marker: int = TLV_FLOAT) -> bytes:
     """Builds a SET FLOAT command (type 0x12) - sound mode / equalizer.
 
     >>> build_set_float(PARAM_EQ_ENABLED, 1.0).hex()
@@ -492,9 +508,18 @@ def build_set_float(param: int, value: float) -> bytes:
     '5a120701960b000080c0'
     """
     payload = (
-        bytes([SET_FLOAT_PREFIX, TLV_FLOAT, param]) + struct.pack("<f", value)
+        bytes([SET_FLOAT_PREFIX, marker, param]) + struct.pack("<f", value)
     )
     return build_frame(CMD_SET_FLOAT, payload)
+
+
+def build_set_crystalvoice_float(param: int, value: float) -> bytes:
+    """SET FLOAT command for a CrystalVoice parameter (marker TLV_CRYSTALVOICE).
+
+    >>> build_set_crystalvoice_float(PARAM_CV_NOISE_REDUCTION_ENABLED, 1.0).hex()
+    '5a12070195040000803f'
+    """
+    return build_set_float(param, value, marker=TLV_CRYSTALVOICE)
 
 
 def build_direct_mode_status() -> bytes:

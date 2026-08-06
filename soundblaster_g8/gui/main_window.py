@@ -9,9 +9,9 @@ reset on the card and takes 2 to 4 seconds, which would freeze the window if
 done in the Tk callback. The result is brought back to the GUI thread via
 ``self.after(0, ...)``.
 
-The window holds two "pages" (main page / Equalizer page) in the same
-container, only one packed at a time (no floating window): see
-``_show_main_page``/``_show_eq_page``.
+The window holds three "pages" (main page / Equalizer page / CrystalVoice
+page) in the same container, only one packed at a time (no floating
+window): see ``_show_main_page``/``_show_eq_page``/``_show_cv_page``.
 """
 
 import threading
@@ -21,17 +21,17 @@ from typing import Callable, Optional
 
 from ..controller import SoundBlasterController
 from . import i18n, theme, widgets
+from .crystalvoice_panel import CrystalVoicePanel
 from .eq_panel import EQPanel
 
 MIN_WINDOW_WIDTH = 640
 ASSETS_DIR = Path(__file__).parent / "assets"
 
-#: (feature key, icon glyph, title msgid, subtitle msgid) for the three
+#: (feature key, icon glyph, title msgid, subtitle msgid) for the two
 #: toggle rows on the main page.
 TOGGLE_DEFS = [
     ("direct_mode", "direct", "Direct Mode", "No signal processing"),
     ("scout_mode", "scout", "Scout Mode", "In-game sound detection"),
-    ("crystalvoice", "voice", "CrystalVoice", "In-game voice optimization"),
 ]
 
 
@@ -55,7 +55,6 @@ class MainWindow(tk.Tk):
         # Toggle state
         self._direct_mode_var = tk.BooleanVar(value=False)
         self._scout_mode_var = tk.BooleanVar(value=False)
-        self._crystalvoice_var = tk.BooleanVar(value=False)
 
         # Sound mode: parallel lists (slugs/labels) driving the SplitSelect.
         self._sound_mode_slugs: list[str] = []
@@ -67,6 +66,7 @@ class MainWindow(tk.Tk):
         self._switches: dict[str, widgets.ToggleSwitch] = {}
         self._toggle_rows: dict[str, dict] = {}
         self._eq_enabled = True
+        self._cv_enabled = True
 
         # Last status message shown, as (msgid_template, kwargs), so it can
         # be re-rendered in place when the language changes.
@@ -89,10 +89,12 @@ class MainWindow(tk.Tk):
 
         self._main_page = tk.Frame(self._pages_container, bg=theme.BG_WINDOW)
         self._eq_page = tk.Frame(self._pages_container, bg=theme.BG_WINDOW)
+        self._cv_page = tk.Frame(self._pages_container, bg=theme.BG_WINDOW)
 
         self._setup_main_page(self._main_page)
-        # EQPanel needs the controller: built in _init_controller.
+        # EQPanel/CrystalVoicePanel need the controller: built in _init_controller.
         self._eq_panel: Optional[EQPanel] = None
+        self._cv_panel: Optional[CrystalVoicePanel] = None
 
         # Status bar (shared between both pages)
         status_bar = tk.Frame(self, bg=theme.BG_WINDOW)
@@ -187,12 +189,10 @@ class MainWindow(tk.Tk):
             var = {
                 "direct_mode": self._direct_mode_var,
                 "scout_mode": self._scout_mode_var,
-                "crystalvoice": self._crystalvoice_var,
             }[key]
             handler = {
                 "direct_mode": self._on_direct_mode_change,
                 "scout_mode": self._on_scout_mode_change,
-                "crystalvoice": self._on_crystalvoice_change,
             }[key]
             self._toggle_rows[key] = self._build_toggle_row(
                 left, icon, title_msgid, subtitle_msgid, var, handler,
@@ -200,10 +200,10 @@ class MainWindow(tk.Tk):
 
         self._direct_toggle_switch = self._toggle_rows["direct_mode"]["switch"]
         self._scout_toggle_switch = self._toggle_rows["scout_mode"]["switch"]
-        self._crystalvoice_toggle_switch = self._toggle_rows["crystalvoice"]["switch"]
 
         self._build_sound_mode_row(right)
         self._build_equalizer_row(right)
+        self._build_crystalvoice_row(right)
 
     def _build_photo_header(self, parent):
         """Shows the product photo (rounded corners) at the top of the main page."""
@@ -288,6 +288,18 @@ class MainWindow(tk.Tk):
         self._bind_click_recursive(row, self._on_eq_row_click)
         self._set_row_cursor(row, "hand2")
 
+    def _build_crystalvoice_row(self, parent):
+        """Clickable "CrystalVoice" row (badge + title + subtitle), no card background."""
+        row, badge, title_label, subtitle_label = self._build_row_icon_text(
+            parent, "voice", i18n._("CrystalVoice"), i18n._("In-game voice optimization"), subtitle_wrap=280,
+        )
+        self._cv_row = row
+        self._cv_nav_badge = badge
+        self._cv_nav_title = title_label
+        self._cv_nav_subtitle = subtitle_label
+        self._bind_click_recursive(row, self._on_cv_row_click)
+        self._set_row_cursor(row, "hand2")
+
     def _bind_click_recursive(self, widget, handler) -> None:
         widget.bind("<Button-1>", handler)
         for child in widget.winfo_children():
@@ -312,6 +324,17 @@ class MainWindow(tk.Tk):
         self._eq_nav_subtitle.config(fg=theme.FG_SECONDARY if enabled else theme.FG_THUMB_DISABLED)
         self._set_row_cursor(self._eq_row, "hand2" if enabled else "arrow")
 
+    def _on_cv_row_click(self, _event=None):
+        if self._cv_enabled:
+            self._show_cv_page()
+
+    def _set_cv_nav_enabled(self, enabled: bool) -> None:
+        self._cv_enabled = enabled
+        self._cv_nav_badge.set_enabled(enabled)
+        self._cv_nav_title.config(fg=theme.FG_PRIMARY if enabled else theme.FG_THUMB_DISABLED)
+        self._cv_nav_subtitle.config(fg=theme.FG_SECONDARY if enabled else theme.FG_THUMB_DISABLED)
+        self._set_row_cursor(self._cv_row, "hand2" if enabled else "arrow")
+
     def _on_language_change(self, index: int) -> None:
         """Handles a language-selector change; persists and re-renders everything in place."""
         if 0 <= index < len(self._lang_codes):
@@ -322,9 +345,10 @@ class MainWindow(tk.Tk):
         self.title(i18n._("Sound Blaster G8 - Control"))
         self._back_button.set_text(i18n._("←  Back"))
 
-        on_eq_page = self._eq_page.winfo_ismapped()
-        if on_eq_page:
+        if self._eq_page.winfo_ismapped():
             self._title_label.config(text=i18n._("Equalizer"), font=theme.FONT_TITLE_EQ)
+        elif self._cv_page.winfo_ismapped():
+            self._title_label.config(text=i18n._("CrystalVoice"), font=theme.FONT_TITLE_EQ)
         else:
             self._title_label.config(text=i18n._("Sound Blaster G8"), font=theme.FONT_TITLE)
 
@@ -343,6 +367,12 @@ class MainWindow(tk.Tk):
 
         self._eq_nav_title.config(text=i18n._("Equalizer"))
 
+        self._cv_nav_title.config(text=i18n._("CrystalVoice"))
+        cv_subtitle = i18n._("In-game voice optimization")
+        if "crystalvoice" in self._unavailable:
+            cv_subtitle = f"{cv_subtitle}\n{i18n._('(not implemented)')}"
+        self._cv_nav_subtitle.config(text=cv_subtitle)
+
         if self._controller is not None:
             modes = self._controller.list_sound_modes()
             self._sound_mode_slugs = [slug for slug, _label in modes]
@@ -354,6 +384,9 @@ class MainWindow(tk.Tk):
         if self._eq_panel is not None:
             self._eq_panel.retranslate()
 
+        if self._cv_panel is not None:
+            self._cv_panel.retranslate()
+
         self._render_status()
 
     def _init_controller(self):
@@ -363,7 +396,6 @@ class MainWindow(tk.Tk):
         self._switches = {
             "direct_mode": self._direct_toggle_switch,
             "scout_mode": self._scout_toggle_switch,
-            "crystalvoice": self._crystalvoice_toggle_switch,
         }
         self._controller.add_listener("reconnecting", self._on_reconnecting)
 
@@ -379,6 +411,12 @@ class MainWindow(tk.Tk):
             status_callback=self._set_status,
         )
         self._eq_panel.pack(fill=tk.BOTH, expand=True)
+
+        self._cv_panel = CrystalVoicePanel(
+            self._cv_page, self._controller,
+            status_callback=self._set_status,
+        )
+        self._cv_panel.pack(fill=tk.BOTH, expand=True)
 
         if self._controller.connect():
             info = self._controller.get_debug_info()
@@ -397,7 +435,7 @@ class MainWindow(tk.Tk):
         if not self._controller:
             return
 
-        for feature in ("direct_mode", "scout_mode", "crystalvoice"):
+        for feature in ("direct_mode", "scout_mode"):
             if not self._controller.is_feature_supported(feature):
                 self._unavailable.add(feature)
                 row = self._toggle_rows[feature]
@@ -420,6 +458,10 @@ class MainWindow(tk.Tk):
             self._unavailable.add("eq")
             self._set_eq_nav_enabled(False)
 
+        if not self._controller.is_feature_supported("crystalvoice"):
+            self._unavailable.add("crystalvoice")
+            self._set_cv_nav_enabled(False)
+
     def _load_current_state(self):
         """Loads the current state from the controller."""
         if not self._controller:
@@ -428,7 +470,6 @@ class MainWindow(tk.Tk):
         # Load the states
         self._direct_mode_var.set(self._controller.get_direct_mode())
         self._scout_mode_var.set(self._controller.get_scout_mode())
-        self._crystalvoice_var.set(self._controller.get_crystalvoice())
         self._select_sound_mode(self._controller.get_sound_mode())
         self._update_eq_button_label()
 
@@ -456,6 +497,7 @@ class MainWindow(tk.Tk):
     def _show_main_page(self):
         """Shows the main page (hides the back button)."""
         self._eq_page.pack_forget()
+        self._cv_page.pack_forget()
         self._back_button.place_forget()
         self._title_label.config(text=i18n._("Sound Blaster G8"), font=theme.FONT_TITLE)
         self._main_page.pack(expand=True, fill=tk.BOTH)
@@ -469,6 +511,16 @@ class MainWindow(tk.Tk):
         self._eq_page.pack(expand=True, fill=tk.BOTH)
         self._fit_window_to_page()
         self._prepare_eq_page_async()
+
+    def _show_cv_page(self):
+        """Shows the CrystalVoice page (with a back button at the top left)."""
+        self._main_page.pack_forget()
+        self._back_button.place(x=24, rely=0.5, anchor="w")
+        self._title_label.config(text=i18n._("CrystalVoice"), font=theme.FONT_TITLE_EQ)
+        self._cv_page.pack(expand=True, fill=tk.BOTH)
+        self._fit_window_to_page()
+        if self._cv_panel is not None:
+            self._cv_panel.refresh()
 
     def _prepare_eq_page_async(self):
         """Prepares the equalizer (enables + applies a flat state if needed).
@@ -610,13 +662,6 @@ class MainWindow(tk.Tk):
             "scout_mode", i18n._("Scout Mode"), self._scout_mode_var,
             lambda v: self._controller.set_scout_mode(v),
             getter=lambda: self._controller.get_scout_mode(),
-        )
-
-    def _on_crystalvoice_change(self):
-        """Handles a CrystalVoice change."""
-        self._handle_toggle(
-            "crystalvoice", i18n._("CrystalVoice"), self._crystalvoice_var,
-            lambda v: self._controller.set_crystalvoice(v),
         )
 
     def _on_sound_mode_change(self, index: int):

@@ -14,7 +14,7 @@ from .driver import PRODUCT_ID, VENDOR_ID, SoundBlasterG8Driver, get_driver
 from .sound_modes import DEFAULT_SOUND_MODE, SOUND_MODES
 
 #: Features whose USB frame has been identified and validated on hardware.
-SUPPORTED_FEATURES = frozenset({"scout_mode", "direct_mode", "sound_mode", "eq"})
+SUPPORTED_FEATURES = frozenset({"scout_mode", "direct_mode", "sound_mode", "eq", "crystalvoice"})
 
 #: "Tilt" weights for the Bass/Treble sliders (bands 0x0b..0x14, in that
 #: order). These two sliders have no dedicated parameter on the card: in
@@ -47,7 +47,10 @@ class SoundBlasterController:
         self._driver = driver if driver else get_driver()
         self._direct_mode = False
         self._scout_mode = False
-        self._crystalvoice = False
+        self._cv_noise_reduction = False
+        self._cv_noise_reduction_level = 0.0
+        self._cv_echo_cancellation = False
+        self._cv_smart_volume = False
         self._eq_bands: list[float] = [0.0] * self.NUM_BANDS
         self._eq_preamp: float = 0.0
         self._eq_enabled: bool = False
@@ -62,7 +65,10 @@ class SoundBlasterController:
         self._listeners: dict[str, list[Callable]] = {
             "direct_mode_changed": [],
             "scout_mode_changed": [],
-            "crystalvoice_changed": [],
+            "crystalvoice_noise_reduction_changed": [],
+            "crystalvoice_noise_reduction_level_changed": [],
+            "crystalvoice_echo_cancellation_changed": [],
+            "crystalvoice_smart_volume_changed": [],
             "eq_band_changed": [],
             "eq_all_bands_changed": [],
             "eq_preamp_changed": [],
@@ -126,7 +132,9 @@ class SoundBlasterController:
         for name, getter in (
             ("_direct_mode", self._driver.get_direct_mode),
             ("_scout_mode", self._driver.get_scout_mode),
-            ("_crystalvoice", self._driver.get_crystalvoice),
+            ("_cv_noise_reduction", self._driver.get_crystalvoice_noise_reduction),
+            ("_cv_echo_cancellation", self._driver.get_crystalvoice_echo_cancellation),
+            ("_cv_smart_volume", self._driver.get_crystalvoice_smart_volume),
         ):
             try:
                 value = getter()
@@ -135,6 +143,14 @@ class SoundBlasterController:
                 continue
             if value is not None:
                 setattr(self, name, bool(value))
+
+        try:
+            level = self._driver.get_crystalvoice_noise_reduction_level()
+        except Exception as exc:
+            print(f"[SoundBlasterController] Unable to read _cv_noise_reduction_level: {exc}")
+            level = None
+        if level is not None:
+            self._cv_noise_reduction_level = level
 
         try:
             bands = self._driver.eq_get_all_bands()
@@ -277,20 +293,57 @@ class SoundBlasterController:
         return ok
 
     # ------------------------------------------------------------------
-    # Not yet reverse-engineered functions
+    # CrystalVoice (supported)
     # ------------------------------------------------------------------
 
-    def set_crystalvoice(self, enabled: bool) -> bool:
-        ok = bool(self._driver.set_crystalvoice(enabled))
+    def set_crystalvoice_noise_reduction(self, enabled: bool) -> bool:
+        ok = bool(self._driver.set_crystalvoice_noise_reduction(enabled))
         if ok:
-            self._crystalvoice = enabled
-            self._notify("crystalvoice_changed", enabled)
+            self._cv_noise_reduction = enabled
+            self._notify("crystalvoice_noise_reduction_changed", enabled)
         else:
-            self._notify("command_failed", "crystalvoice", enabled)
+            self._notify("command_failed", "crystalvoice_noise_reduction", enabled)
         return ok
 
-    def get_crystalvoice(self) -> bool:
-        return self._crystalvoice
+    def get_crystalvoice_noise_reduction(self) -> bool:
+        return self._cv_noise_reduction
+
+    def set_crystalvoice_noise_reduction_level(self, value: float) -> bool:
+        clamped = max(0.0, min(1.0, value))
+        ok = bool(self._driver.set_crystalvoice_noise_reduction_level(clamped))
+        if ok:
+            self._cv_noise_reduction_level = clamped
+            self._notify("crystalvoice_noise_reduction_level_changed", clamped)
+        else:
+            self._notify("command_failed", "crystalvoice_noise_reduction_level", clamped)
+        return ok
+
+    def get_crystalvoice_noise_reduction_level(self) -> float:
+        return self._cv_noise_reduction_level
+
+    def set_crystalvoice_echo_cancellation(self, enabled: bool) -> bool:
+        ok = bool(self._driver.set_crystalvoice_echo_cancellation(enabled))
+        if ok:
+            self._cv_echo_cancellation = enabled
+            self._notify("crystalvoice_echo_cancellation_changed", enabled)
+        else:
+            self._notify("command_failed", "crystalvoice_echo_cancellation", enabled)
+        return ok
+
+    def get_crystalvoice_echo_cancellation(self) -> bool:
+        return self._cv_echo_cancellation
+
+    def set_crystalvoice_smart_volume(self, enabled: bool) -> bool:
+        ok = bool(self._driver.set_crystalvoice_smart_volume(enabled))
+        if ok:
+            self._cv_smart_volume = enabled
+            self._notify("crystalvoice_smart_volume_changed", enabled)
+        else:
+            self._notify("command_failed", "crystalvoice_smart_volume", enabled)
+        return ok
+
+    def get_crystalvoice_smart_volume(self) -> bool:
+        return self._cv_smart_volume
 
     # ------------------------------------------------------------------
     # 10-band EQ (local state only for now)

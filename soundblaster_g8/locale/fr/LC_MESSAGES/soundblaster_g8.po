@@ -174,3 +174,27 @@ msgstr "{label} : {value:+.1f} dB appliqué (approximatif)"
 
 msgid "Preset \"{label}\" applied"
 msgstr "Preset « {label} » appliqué"
+
+msgid "Noise Reduction"
+msgstr "Réduction du bruit"
+
+msgid "Reduce static background noises on outgoing audio during conference calls"
+msgstr "Réduit les bruits de fond statiques sur l'audio sortant pendant les appels"
+
+msgid "Acoustic Echo Cancellation"
+msgstr "Suppression de l'écho acoustique"
+
+msgid "Eliminate echoes that interfere with conversation"
+msgstr "Élimine les échos qui perturbent la conversation"
+
+msgid "Smart Volume"
+msgstr "Volume intelligent"
+
+msgid "Be heard clearly without having to shout or whisper"
+msgstr "Soyez entendu clairement sans avoir à crier ou chuchoter"
+
+msgid "{label}: sending {value:.0f}%…"
+msgstr "{label} : envoi de {value:.0f} %…"
+
+msgid "{label}: {value:.0f}% applied"
+msgstr "{label} : {value:.0f} % appliqué"

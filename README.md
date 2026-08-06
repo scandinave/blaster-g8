@@ -12,7 +12,7 @@ on **macOS** and **Linux** (Windows possible via hidapi, untested).
 | **Sound Mode** | ✅ Working | 51 modes (games, music, generic equalizers) reverse-engineered from dedicated captures, `0x12` frame per parameter |
 | **10-band equalizer + Preamp** | ✅ Working | Manual editing via slider, `0x12` frame per band, validated on hardware |
 | **Bass / Treble** | ⚠️ Approximate | No dedicated parameter on the card: rewrites the 10 bands based on a curve estimated from `Equalizer-manual.pcapng`, not guaranteed identical to Creative |
-| CrystalVoice | ⛔ Not implemented | USB frame not yet captured |
+| **CrystalVoice** (Noise Reduction, Acoustic Echo Cancellation, Smart Volume) | ✅ Working | `0x12` frame per parameter, same mechanism as the equalizer but with a dedicated TLV marker (`0x95`), reverse-engineered from the `CrystalVoice-*.pcapng` captures |
 
 Unimplemented features are greyed out in the interface: they don't
 pretend to act on the card until the corresponding frame has been
@@ -356,6 +356,33 @@ acknowledged by the card but remain inaudible while the EQ master is off
 (active mode "Disabled"). So the app automatically enables `param 0x09`
 (`controller.ensure_eq_enabled`) when entering the Equalizer page.
 
+### CrystalVoice (Noise Reduction, Acoustic Echo Cancellation, Smart Volume)
+
+Same mechanism as Sound Mode/EQ (`CMD_SET_FLOAT`, type `0x12`), but with a
+**dedicated TLV marker `0x95`** instead of `0x96`: CrystalVoice and
+EQ/sound-mode parameters reuse the same numeric ids (e.g. `0x00`, `0x04`,
+`0x05`), so the marker is what disambiguates the two namespaces - both on
+write (`payload = 0x01 0x95 <param> <f32 LE>`) and on the `0x11` parameter
+dump the card sends back after a write.
+
+```
+writing Noise Reduction ON: 5a 12 07 01 95 04 00 00 80 3f
+ACK                        : 5a 02 0a 12 00 ...
+dump (0x11)                : ... 95 04 00 00 80 3f ...  (kind=0x95, param=0x04, value=1.0)
+```
+
+Parameters confirmed from the `CrystalVoice-*.pcapng` captures:
+
+- param `0x00`: Acoustic Echo Cancellation (0/1)
+- param `0x04`: Noise Reduction on/off (0/1)
+- param `0x05`: Noise Reduction level, float **0.0-1.0** (continuous, 30 samples captured while dragging the slider)
+- param `0x2c`: Smart Voice on/off (0/1)
+
+Because the marker matters, `protocol.DecodedState.params` is keyed by
+`(marker, param_id)`, not by `param_id` alone (a flat dict on `param_id`
+would silently mix an EQ/sound-mode value with a CrystalVoice one sharing
+the same id).
+
 ## Contributing to the reverse engineering
 
 To add a feature (Direct Mode, CrystalVoice, EQ...):
@@ -433,6 +460,7 @@ OpenCreativeApp/
     └── gui/
         ├── main_window.py
         ├── eq_panel.py
+        ├── crystalvoice_panel.py
         └── i18n.py               # translation loader/API
 ```
 

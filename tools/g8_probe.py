@@ -290,6 +290,18 @@ def cmd_selftest() -> int:
         "5a12070196090000803f",
     )
     ok &= _check(
+        "SET_FLOAT (CrystalVoice Noise Reduction ON)",
+        protocol.build_set_crystalvoice_float(
+            protocol.PARAM_CV_NOISE_REDUCTION_ENABLED, 1.0
+        ).hex(),
+        "5a12070195040000803f",
+    )
+    ok &= _check(
+        "SET_FLOAT (CrystalVoice Smart Volume OFF)",
+        protocol.build_set_crystalvoice_float(protocol.PARAM_CV_SMART_VOICE, 0.0).hex(),
+        "5a120701952c00000000",
+    )
+    ok &= _check(
         "Generated sound modes",
         len(SOUND_MODES) > 0,
         True,
