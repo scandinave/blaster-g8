@@ -10,6 +10,12 @@ respond.
 from typing import Callable, Optional
 
 from . import alsa_fix, protocol
+from .crystalvoice_presets import (
+    DEFAULT_MIC_EQ,
+    DEFAULT_VOICE_MORPH,
+    MIC_EQ_PRESETS,
+    VOICE_MORPH_PRESETS,
+)
 from .driver import PRODUCT_ID, VENDOR_ID, SoundBlasterG8Driver, get_driver
 from .sound_modes import DEFAULT_SOUND_MODE, SOUND_MODES
 
@@ -51,6 +57,10 @@ class SoundBlasterController:
         self._cv_noise_reduction_level = 0.0
         self._cv_echo_cancellation = False
         self._cv_smart_volume = False
+        self._cv_voice_morph = False
+        self._cv_voice_morph_preset: str = DEFAULT_VOICE_MORPH
+        self._cv_mic_equalizer = False
+        self._cv_mic_equalizer_preset: str = DEFAULT_MIC_EQ
         self._eq_bands: list[float] = [0.0] * self.NUM_BANDS
         self._eq_preamp: float = 0.0
         self._eq_enabled: bool = False
@@ -69,6 +79,10 @@ class SoundBlasterController:
             "crystalvoice_noise_reduction_level_changed": [],
             "crystalvoice_echo_cancellation_changed": [],
             "crystalvoice_smart_volume_changed": [],
+            "crystalvoice_voice_morph_changed": [],
+            "crystalvoice_voice_morph_preset_changed": [],
+            "crystalvoice_mic_equalizer_changed": [],
+            "crystalvoice_mic_equalizer_preset_changed": [],
             "eq_band_changed": [],
             "eq_all_bands_changed": [],
             "eq_preamp_changed": [],
@@ -135,6 +149,8 @@ class SoundBlasterController:
             ("_cv_noise_reduction", self._driver.get_crystalvoice_noise_reduction),
             ("_cv_echo_cancellation", self._driver.get_crystalvoice_echo_cancellation),
             ("_cv_smart_volume", self._driver.get_crystalvoice_smart_volume),
+            ("_cv_voice_morph", self._driver.get_crystalvoice_voice_morph),
+            ("_cv_mic_equalizer", self._driver.get_crystalvoice_mic_equalizer),
         ):
             try:
                 value = getter()
@@ -344,6 +360,90 @@ class SoundBlasterController:
 
     def get_crystalvoice_smart_volume(self) -> bool:
         return self._cv_smart_volume
+
+    def set_crystalvoice_voice_morph(self, enabled: bool) -> bool:
+        ok = bool(self._driver.set_crystalvoice_voice_morph(enabled))
+        if ok:
+            self._cv_voice_morph = enabled
+            self._notify("crystalvoice_voice_morph_changed", enabled)
+        else:
+            self._notify("command_failed", "crystalvoice_voice_morph", enabled)
+        return ok
+
+    def get_crystalvoice_voice_morph(self) -> bool:
+        return self._cv_voice_morph
+
+    def set_crystalvoice_mic_equalizer(self, enabled: bool) -> bool:
+        ok = bool(self._driver.set_crystalvoice_mic_equalizer(enabled))
+        if ok:
+            self._cv_mic_equalizer = enabled
+            self._notify("crystalvoice_mic_equalizer_changed", enabled)
+        else:
+            self._notify("command_failed", "crystalvoice_mic_equalizer", enabled)
+        return ok
+
+    def get_crystalvoice_mic_equalizer(self) -> bool:
+        return self._cv_mic_equalizer
+
+    # --- CrystalVoice presets (Voice Morph / Microphone Equalizer) ---
+    # Same contract as the sound modes: an ordered sequence of CMD_SET_FLOAT
+    # writes replayed from the captures. The card has no read command for the
+    # active preset (as for Scout Mode / Sound Mode), so ``get_*_preset``
+    # tracks the last successfully sent command only.
+
+    def list_voice_morph_presets(self) -> list[tuple[str, str]]:
+        """``(slug, label)`` list of the available Voice Morph presets."""
+        return [(preset.slug, preset.label) for preset in VOICE_MORPH_PRESETS.values()]
+
+    def get_voice_morph_preset(self) -> str:
+        """Active Voice Morph preset's slug (local state only)."""
+        return self._cv_voice_morph_preset
+
+    def set_voice_morph_preset(self, slug: str) -> bool:
+        """Applies a Voice Morph preset.
+
+        Returns:
+            ``True`` if the card acknowledged every frame in the sequence.
+        """
+        return self._apply_crystalvoice_preset(
+            VOICE_MORPH_PRESETS, slug, "_cv_voice_morph_preset",
+            "crystalvoice_voice_morph_preset_changed", "voice_morph_preset",
+        )
+
+    def list_mic_equalizer_presets(self) -> list[tuple[str, str]]:
+        """``(slug, label)`` list of the available Microphone Equalizer presets."""
+        return [(preset.slug, preset.label) for preset in MIC_EQ_PRESETS.values()]
+
+    def get_mic_equalizer_preset(self) -> str:
+        """Active Microphone Equalizer preset's slug (local state only)."""
+        return self._cv_mic_equalizer_preset
+
+    def set_mic_equalizer_preset(self, slug: str) -> bool:
+        """Applies a Microphone Equalizer preset.
+
+        Returns:
+            ``True`` if the card acknowledged every frame in the sequence.
+        """
+        return self._apply_crystalvoice_preset(
+            MIC_EQ_PRESETS, slug, "_cv_mic_equalizer_preset",
+            "crystalvoice_mic_equalizer_preset_changed", "mic_equalizer_preset",
+        )
+
+    def _apply_crystalvoice_preset(
+        self, presets: dict, slug: str, attr: str, event: str, failure_name: str,
+    ) -> bool:
+        """Shared body of :meth:`set_voice_morph_preset`/:meth:`set_mic_equalizer_preset`."""
+        preset = presets.get(slug)
+        if preset is None:
+            raise ValueError(f"Unknown CrystalVoice preset: {slug}")
+
+        ok = bool(self._driver.set_crystalvoice_params(list(preset.writes)))
+        if ok:
+            setattr(self, attr, slug)
+            self._notify(event, slug)
+        else:
+            self._notify("command_failed", failure_name, slug)
+        return ok
 
     # ------------------------------------------------------------------
     # 10-band EQ (local state only for now)

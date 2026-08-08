@@ -126,3 +126,16 @@ def sound_mode_label(slug: str, fallback_label: str) -> str:
     if slug not in _SOUND_MODE_SLUGS:
         return fallback_label
     return _(f"sound_mode.{slug}")
+
+
+def crystalvoice_preset_label(slug: str, fallback_label: str) -> str:
+    """Translated display label for a Voice Morph / Microphone Equalizer slug.
+
+    Unlike :func:`sound_mode_label`, every CrystalVoice preset has a catalog
+    entry (they all come from the French Creative app), so there's no slug
+    whitelist to keep in sync: an untranslated key simply comes back as the
+    msgid itself, in which case the data-file label is used instead.
+    """
+    msgid = f"crystalvoice_preset.{slug}"
+    translated = _(msgid)
+    return fallback_label if translated == msgid else translated

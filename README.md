@@ -13,6 +13,8 @@ on **macOS** and **Linux** (Windows possible via hidapi, untested).
 | **10-band equalizer + Preamp** | ✅ Working | Manual editing via slider, `0x12` frame per band, validated on hardware |
 | **Bass / Treble** | ⚠️ Approximate | No dedicated parameter on the card: rewrites the 10 bands based on a curve estimated from `Equalizer-manual.pcapng`, not guaranteed identical to Creative |
 | **CrystalVoice** (Noise Reduction, Acoustic Echo Cancellation, Smart Volume) | ✅ Working | `0x12` frame per parameter, same mechanism as the equalizer but with a dedicated TLV marker (`0x95`), reverse-engineered from the `CrystalVoice-*.pcapng` captures |
+| **Voice Morph** | ✅ Working | 18 presets replayed as a sequence of 8 `0x12` writes (marker `0x95`), plus a dedicated on/off parameter |
+| **Microphone Equalizer** | ✅ Working | 9 presets replayed as a sequence of 10 `0x12` writes (marker `0x95`), plus a dedicated on/off parameter |
 
 Unimplemented features are greyed out in the interface: they don't
 pretend to act on the card until the corresponding frame has been
@@ -356,7 +358,7 @@ acknowledged by the card but remain inaudible while the EQ master is off
 (active mode "Disabled"). So the app automatically enables `param 0x09`
 (`controller.ensure_eq_enabled`) when entering the Equalizer page.
 
-### CrystalVoice (Noise Reduction, Acoustic Echo Cancellation, Smart Volume)
+### CrystalVoice (Noise Reduction, Echo Cancellation, Smart Volume, Voice Morph, Mic Equalizer)
 
 Same mechanism as Sound Mode/EQ (`CMD_SET_FLOAT`, type `0x12`), but with a
 **dedicated TLV marker `0x95`** instead of `0x96`: CrystalVoice and
@@ -376,12 +378,42 @@ Parameters confirmed from the `CrystalVoice-*.pcapng` captures:
 - param `0x00`: Acoustic Echo Cancellation (0/1)
 - param `0x04`: Noise Reduction on/off (0/1)
 - param `0x05`: Noise Reduction level, float **0.0-1.0** (continuous, 30 samples captured while dragging the slider)
+- param `0x0a`: Voice Morph on/off (0/1)
+- params `0x0b`-`0x12`: the 8 Voice Morph parameters (one preset)
+- param `0x13`: Microphone Equalizer on/off (0/1)
+- params `0x14`-`0x1d`: the 10 Microphone Equalizer bands, in dB
 - param `0x2c`: Smart Voice on/off (0/1)
 
 Because the marker matters, `protocol.DecodedState.params` is keyed by
 `(marker, param_id)`, not by `param_id` alone (a flat dict on `param_id`
 would silently mix an EQ/sound-mode value with a CrystalVoice one sharing
 the same id).
+
+#### Voice Morph and Microphone Equalizer presets
+
+Both work like a sound mode: a preset is an ordered sequence of `0x12`
+writes replayed as-is from the capture (`driver.set_crystalvoice_params`).
+The two families were extracted into `soundblaster_g8/crystalvoice_presets.py`
+by `tools/extract_crystalvoice_presets.py`, from one capture per preset:
+
+```bash
+python tools/extract_crystalvoice_presets.py --input ~/Documents/pcap
+```
+
+- `CrystalVoice-VoiceMorph-<name>.pcapng` → 18 presets, params `0x0b`-`0x12`
+- `CrystalVoice-MicroEqualizer-<name>.pcapng` → 9 presets, params `0x14`-`0x1d`
+
+The enable bit (`0x0a` / `0x13`) is **never** part of a preset: the Creative
+application writes it only when the user flips the feature's switch. A preset
+applied while the feature is off is acknowledged by the card but inaudible -
+the same trap as `param 0x09` for the equalizer. Hence the GUI pairing a
+toggle with each dropdown, the dropdown being greyed out while the toggle is
+off.
+
+Two mic-EQ captures, `broadcast` and `pitch-reduction`, yield byte-identical
+band values `(0, 0, 2, 2, -2, 0, -4, 4, 0, 0)`. This was reproduced across two
+separate capture sessions, so it is kept as-is rather than treated as a
+capture error.
 
 ## Contributing to the reverse engineering
 
@@ -448,12 +480,14 @@ OpenCreativeApp/
 ├── main.py                      # GUI entry point
 ├── tools/g8_probe.py            # diagnostic / reverse-engineering CLI
 ├── tools/extract_sound_modes.py # generates sound_modes.py from pcap captures
+├── tools/extract_crystalvoice_presets.py # generates crystalvoice_presets.py from pcap captures
 ├── tools/compile_translations.py # compiles .po translation catalogs to .mo
 ├── udev/99-soundblaster-g8.rules
 └── soundblaster_g8/
     ├── hidbackend.py            # hidapi backend selection (only platform-specific code)
     ├── protocol.py               # frame encoding/decoding (no I/O)
     ├── sound_modes.py           # generated sound modes (see extract_sound_modes.py)
+    ├── crystalvoice_presets.py  # generated Voice Morph / mic-EQ presets
     ├── driver.py                 # HID I/O (hidapi)
     ├── controller.py             # business logic + events
     ├── locale/                  # EN/FR translation catalogs (.po/.mo)

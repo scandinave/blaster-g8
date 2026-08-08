@@ -193,6 +193,113 @@ msgstr "Volume intelligent"
 msgid "Be heard clearly without having to shout or whisper"
 msgstr "Soyez entendu clairement sans avoir à crier ou chuchoter"
 
+msgid "Voice Morph"
+msgstr "Morphing vocal"
+
+msgid "Morph you voice into different characters and accents"
+msgstr "Transformez votre voix en différents personnages et accents"
+
+msgid "Microphone Equalizer"
+msgstr "Égaliseur du microphone"
+
+msgid "Improve microphone performance and quality of your voice"
+msgstr "Améliore les performances du microphone et la qualité de votre voix"
+
+#. CrystalVoice preset overlay: the Voice Morph and Microphone Equalizer
+#. preset names, keyed by slug (see gui/i18n.crystalvoice_preset_label).
+#. All of them come from the French Creative application, so unlike the
+#. sound modes every slug has an entry here. Not extracted from
+#. crystalvoice_presets.py: keep in sync when new captures are added.
+msgid "crystalvoice_preset.neutral"
+msgstr "Neutre"
+
+msgid "crystalvoice_preset.men"
+msgstr "Homme"
+
+msgid "crystalvoice_preset.women"
+msgstr "Femme"
+
+msgid "crystalvoice_preset.child"
+msgstr "Enfant"
+
+msgid "crystalvoice_preset.old-people"
+msgstr "Personne âgée"
+
+msgid "crystalvoice_preset.chipmink"
+msgstr "Écureuil"
+
+msgid "crystalvoice_preset.deepvoice"
+msgstr "Voix grave"
+
+msgid "crystalvoice_preset.demon"
+msgstr "Démon"
+
+msgid "crystalvoice_preset.emo"
+msgstr "Emo"
+
+msgid "crystalvoice_preset.orc"
+msgstr "Orc"
+
+msgid "crystalvoice_preset.robot"
+msgstr "Robot"
+
+msgid "crystalvoice_preset.nain"
+msgstr "Nain"
+
+msgid "crystalvoice_preset.lutin"
+msgstr "Lutin"
+
+msgid "crystalvoice_preset.marin"
+msgstr "Marin"
+
+msgid "crystalvoice_preset.brutable"
+msgstr "Brute"
+
+msgid "crystalvoice_preset.instable"
+msgstr "Instable"
+
+msgid "crystalvoice_preset.agent-infiltre"
+msgstr "Agent infiltré"
+
+msgid "crystalvoice_preset.from-the-north"
+msgstr "Venu du Nord"
+
+msgid "crystalvoice_preset.equilibre"
+msgstr "Équilibré"
+
+msgid "crystalvoice_preset.clarte-des-voix"
+msgstr "Clarté des voix"
+
+msgid "crystalvoice_preset.chaleur-vocale"
+msgstr "Chaleur vocale"
+
+msgid "crystalvoice_preset.annonce-publique"
+msgstr "Annonce publique"
+
+msgid "crystalvoice_preset.broadcast"
+msgstr "Diffusion"
+
+msgid "crystalvoice_preset.communication"
+msgstr "Communication"
+
+msgid "crystalvoice_preset.enregistrement"
+msgstr "Enregistrement"
+
+msgid "crystalvoice_preset.pitch-boost"
+msgstr "Accentuation des aigus"
+
+msgid "crystalvoice_preset.pitch-reduction"
+msgstr "Accentuation des graves"
+
+msgid "{label}: sending preset \"{preset}\"…"
+msgstr "{label} : envoi du préréglage « {preset} »…"
+
+msgid "{label}: preset \"{preset}\" applied"
+msgstr "{label} : préréglage « {preset} » appliqué"
+
+msgid "{label}: preset \"{preset}\" failed (see console)"
+msgstr "{label} : échec du préréglage « {preset} » (voir la console)"
+
 msgid "{label}: sending {value:.0f}%…"
 msgstr "{label} : envoi de {value:.0f} %…"
 

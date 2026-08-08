@@ -1,13 +1,20 @@
 """
 CrystalVoice page (Noise Reduction, Acoustic Echo Cancellation, Smart
-Volume) for the Sound Blaster G8.
+Volume, Voice Morph, Microphone Equalizer) for the Sound Blaster G8.
 
 Page embedded in ``MainWindow`` (no floating window): see ``main_window.py``
-for navigation (``_show_cv_page``/``_show_main_page``). All three toggles
-and the Noise Reduction level slider use the same ``CMD_SET_FLOAT``
-mechanism as the equalizer (see ``driver.set_crystalvoice_param``), but with
-a dedicated TLV marker (``protocol.TLV_CRYSTALVOICE``) confirmed by the
-``CrystalVoice-*.pcapng`` captures.
+for navigation (``_show_cv_page``/``_show_main_page``). Every toggle, the
+Noise Reduction level slider and the two preset dropdowns use the same
+``CMD_SET_FLOAT`` mechanism as the equalizer (see
+``driver.set_crystalvoice_param``), but with a dedicated TLV marker
+(``protocol.TLV_CRYSTALVOICE``) confirmed by the ``CrystalVoice-*.pcapng``
+captures.
+
+Voice Morph and the Microphone Equalizer each pair a toggle with a preset
+selector, mirroring the Creative application: the enable bit and the preset
+are two independent writes, and a preset applied while the feature is off is
+acknowledged by the card but inaudible - hence the selector being greyed out
+with its toggle.
 """
 
 import threading
@@ -48,11 +55,21 @@ class CrystalVoicePanel(tk.Frame):
         )
         self._echo_cancellation_var = tk.BooleanVar(value=controller.get_crystalvoice_echo_cancellation())
         self._smart_volume_var = tk.BooleanVar(value=controller.get_crystalvoice_smart_volume())
+        self._voice_morph_var = tk.BooleanVar(value=controller.get_crystalvoice_voice_morph())
+        self._mic_equalizer_var = tk.BooleanVar(value=controller.get_crystalvoice_mic_equalizer())
+
+        #: Preset slugs and their translated labels, parallel to the values of
+        #: each SplitSelect (rebuilt on every retranslate, hence attributes).
+        self._voice_morph_slugs: list[str] = []
+        self._voice_morph_labels: list[str] = []
+        self._mic_equalizer_slugs: list[str] = []
+        self._mic_equalizer_labels: list[str] = []
 
         self._setup_ui()
 
     def _setup_ui(self):
-        """Sets up the CrystalVoice UI: a single card with 3 toggles + 1 slider."""
+        """Sets up the CrystalVoice UI: a single card with 5 toggles, 1 slider
+        and 2 preset selectors."""
         #: (label_widget, translation_msgid) pairs for texts that need
         #: re-translating in place (retranslate()).
         self._section_labels: list[tuple[tk.Label, str]] = []
@@ -84,6 +101,29 @@ class CrystalVoicePanel(tk.Frame):
             card, "Smart Volume", "Be heard clearly without having to shout or whisper",
             self._smart_volume_var, self._on_smart_volume_change,
         )
+
+        self._add_separator(card)
+
+        self._morph_switch = self._add_toggle_row(
+            card, "Voice Morph", "Morph you voice into different characters and accents",
+            self._voice_morph_var, self._on_voice_morph_change,
+        )
+        self._morph_select = self._add_preset_select(
+            card, self._voice_morph_var.get(), self._on_voice_morph_preset_change,
+        )
+
+        self._add_separator(card)
+
+        self._mic_eq_switch = self._add_toggle_row(
+            card, "Microphone Equalizer",
+            "Improve microphone performance and quality of your voice",
+            self._mic_equalizer_var, self._on_mic_equalizer_change,
+        )
+        self._mic_eq_select = self._add_preset_select(
+            card, self._mic_equalizer_var.get(), self._on_mic_equalizer_preset_change,
+        )
+
+        self._refresh_preset_selects()
 
     def _build_card(self, parent, title_msgid: str) -> tk.Frame:
         """Builds a section card (label + bordered frame) and returns the inside."""
@@ -177,11 +217,59 @@ class CrystalVoicePanel(tk.Frame):
 
         return slider, value_label
 
+    def _add_preset_select(
+        self, parent, enabled: bool, command: Callable[[int], None],
+    ) -> widgets.SplitSelect:
+        """Builds a preset dropdown under a toggle row (values filled later).
+
+        Values are set by :meth:`_refresh_preset_selects` rather than here, so
+        the same code path serves the initial build and a language switch.
+        """
+        select = widgets.SplitSelect(
+            parent, values=[], command=command, bg=theme.BG_CARD, width=230,
+        )
+        select.pack(anchor="w", pady=(12, 0))
+        select.set_enabled(enabled)
+        return select
+
+    def _refresh_preset_selects(self) -> None:
+        """(Re)fills both dropdowns with translated labels and reselects the
+        active preset - the labels aren't ``tk.Label``s, so ``retranslate``
+        can't go through ``_section_labels`` for them.
+
+        Both dropdowns get the same width (the widest of the two label sets),
+        so the two rows stay visually aligned in every language.
+        """
+        entries = []
+        for select, slugs, labels, listing, active in (
+            (
+                self._morph_select, self._voice_morph_slugs, self._voice_morph_labels,
+                self.controller.list_voice_morph_presets(),
+                self.controller.get_voice_morph_preset(),
+            ),
+            (
+                self._mic_eq_select, self._mic_equalizer_slugs, self._mic_equalizer_labels,
+                self.controller.list_mic_equalizer_presets(),
+                self.controller.get_mic_equalizer_preset(),
+            ),
+        ):
+            slugs[:] = [slug for slug, _label in listing]
+            labels[:] = [i18n.crystalvoice_preset_label(slug, label) for slug, label in listing]
+            select.set_values(labels)
+            if active in slugs:
+                select.set_index(slugs.index(active))
+            entries.append((select, labels))
+
+        width = max(widgets.SplitSelect.compute_width(labels) for _select, labels in entries)
+        for select, _labels in entries:
+            select.config(width=width)
+
     def retranslate(self) -> None:
         """Registered indirectly via ``MainWindow._retranslate``: re-applies
         every static text in place."""
         for label, msgid in self._section_labels:
             label.config(text=i18n._(msgid))
+        self._refresh_preset_selects()
 
     def refresh(self) -> None:
         """Resynchronizes every control with the controller's known state.
@@ -196,6 +284,14 @@ class CrystalVoicePanel(tk.Frame):
         self._echo_cancellation_var.set(self.controller.get_crystalvoice_echo_cancellation())
         self._smart_volume_var.set(self.controller.get_crystalvoice_smart_volume())
 
+        morph = self.controller.get_crystalvoice_voice_morph()
+        self._voice_morph_var.set(morph)
+        self._morph_select.set_enabled(morph)
+        mic_eq = self.controller.get_crystalvoice_mic_equalizer()
+        self._mic_equalizer_var.set(mic_eq)
+        self._mic_eq_select.set_enabled(mic_eq)
+        self._refresh_preset_selects()
+
     # ------------------------------------------------------------------
     # Toggles (run outside the GUI thread)
     # ------------------------------------------------------------------
@@ -206,10 +302,18 @@ class CrystalVoicePanel(tk.Frame):
         var: tk.BooleanVar,
         switch: widgets.ToggleSwitch,
         setter: Callable[[bool], bool],
+        select: Optional[widgets.SplitSelect] = None,
     ):
-        """Runs a toggle in a worker thread, then resynchronizes the display."""
+        """Runs a toggle in a worker thread, then resynchronizes the display.
+
+        ``select`` is the preset dropdown owned by the row, if any: it follows
+        the toggle's *effective* state, so it stays greyed out when the card
+        refuses the command.
+        """
         requested = var.get()
         switch.set_enabled(False)
+        if select is not None:
+            select.set_enabled(False)
         label = i18n._(label_msgid)
         self._set_status("{label}: sending command…", label=label)
 
@@ -220,7 +324,9 @@ class CrystalVoicePanel(tk.Frame):
                 ok = bool(setter(requested))
             except Exception as exc:  # pragma: no cover - depends on hardware
                 error = exc
-            self.after(0, lambda: self._finish_toggle(label, switch, var, requested, ok, error))
+            self.after(
+                0, lambda: self._finish_toggle(label, switch, var, requested, ok, error, select)
+            )
 
         threading.Thread(target=worker, name=f"g8-cv-{label_msgid}", daemon=True).start()
 
@@ -232,10 +338,13 @@ class CrystalVoicePanel(tk.Frame):
         requested: bool,
         ok: bool,
         error: Optional[Exception],
+        select: Optional[widgets.SplitSelect] = None,
     ):
         switch.set_enabled(True)
         effective = requested if ok else not requested
         var.set(effective)
+        if select is not None:
+            select.set_enabled(effective)
 
         if error is not None:
             self._set_status("{label}: error ({error})", label=label, error=error)
@@ -261,6 +370,99 @@ class CrystalVoicePanel(tk.Frame):
             "Smart Volume", self._smart_volume_var, self._smart_switch,
             self.controller.set_crystalvoice_smart_volume,
         )
+
+    def _on_voice_morph_change(self):
+        self._handle_toggle(
+            "Voice Morph", self._voice_morph_var, self._morph_switch,
+            self.controller.set_crystalvoice_voice_morph, self._morph_select,
+        )
+
+    def _on_mic_equalizer_change(self):
+        self._handle_toggle(
+            "Microphone Equalizer", self._mic_equalizer_var, self._mic_eq_switch,
+            self.controller.set_crystalvoice_mic_equalizer, self._mic_eq_select,
+        )
+
+    # ------------------------------------------------------------------
+    # Preset selectors (Voice Morph / Microphone Equalizer)
+    # ------------------------------------------------------------------
+
+    def _on_voice_morph_preset_change(self, index: int):
+        self._handle_preset_change(
+            "Voice Morph", index, self._voice_morph_slugs, self._voice_morph_labels,
+            self._morph_select,
+            self.controller.set_voice_morph_preset, self.controller.get_voice_morph_preset,
+        )
+
+    def _on_mic_equalizer_preset_change(self, index: int):
+        self._handle_preset_change(
+            "Microphone Equalizer", index, self._mic_equalizer_slugs, self._mic_equalizer_labels,
+            self._mic_eq_select,
+            self.controller.set_mic_equalizer_preset, self.controller.get_mic_equalizer_preset,
+        )
+
+    def _handle_preset_change(
+        self,
+        label_msgid: str,
+        index: int,
+        slugs: list[str],
+        labels: list[str],
+        select: widgets.SplitSelect,
+        setter: Callable[[str], bool],
+        getter: Callable[[], str],
+    ):
+        """Applies a preset in a worker thread (same shape as ``_handle_toggle``).
+
+        A preset is a whole sequence of writes: it can take a moment, so it
+        must not run on the GUI thread.
+        """
+        if not 0 <= index < len(slugs):
+            return
+        slug = slugs[index]
+        label = i18n._(label_msgid)
+        preset = labels[index]
+
+        select.set_enabled(False)
+        self._set_status('{label}: sending preset "{preset}"…', label=label, preset=preset)
+
+        def worker():
+            error: Optional[Exception] = None
+            ok = False
+            try:
+                ok = bool(setter(slug))
+            except Exception as exc:  # pragma: no cover - depends on hardware
+                error = exc
+            self.after(
+                0, lambda: self._finish_preset_change(label, preset, select, slugs, getter, ok, error)
+            )
+
+        threading.Thread(target=worker, name=f"g8-cv-preset-{slug}", daemon=True).start()
+
+    def _finish_preset_change(
+        self,
+        label: str,
+        preset: str,
+        select: widgets.SplitSelect,
+        slugs: list[str],
+        getter: Callable[[], str],
+        ok: bool,
+        error: Optional[Exception],
+    ):
+        select.set_enabled(True)
+
+        # On failure, resynchronize the dropdown with the controller's real state.
+        active = getter()
+        if active in slugs:
+            select.set_index(slugs.index(active))
+
+        if error is not None:
+            self._set_status("{label}: error ({error})", label=label, error=error)
+        elif ok:
+            self._set_status('{label}: preset "{preset}" applied', label=label, preset=preset)
+        else:
+            self._set_status(
+                '{label}: preset "{preset}" failed (see console)', label=label, preset=preset
+            )
 
     # ------------------------------------------------------------------
     # Noise Reduction level (slider, commit on release)

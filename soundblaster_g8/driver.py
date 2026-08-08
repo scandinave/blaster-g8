@@ -1048,6 +1048,44 @@ class SoundBlasterG8Driver:
         value = self.get_crystalvoice_param(protocol.PARAM_CV_SMART_VOICE)
         return None if value is None else bool(value)
 
+    def set_crystalvoice_params(self, writes: list[tuple[int, float]]) -> bool:
+        """Replays a sequence of CrystalVoice writes (a Voice Morph / mic-EQ preset).
+
+        CrystalVoice counterpart of :meth:`set_sound_mode`: same "replay the
+        capture in order" contract, only the TLV marker differs. The enable
+        bit isn't part of the sequence (see
+        :mod:`soundblaster_g8.crystalvoice_presets`).
+
+        Returns:
+            ``True`` only if **all** writes were acknowledged.
+        """
+        _log(f"CrystalVoice preset: sending {len(writes)} parameter(s)")
+        with self._io_lock:
+            all_ok = True
+            for param, value in writes:
+                if not self.set_crystalvoice_param(param, value):
+                    all_ok = False
+            _log(f"CrystalVoice preset {'applied' if all_ok else 'partially applied'}")
+            return all_ok
+
+    def set_crystalvoice_voice_morph(self, enabled: bool) -> bool:
+        return self.set_crystalvoice_param(
+            protocol.PARAM_CV_VOICE_MORPH_ENABLED, 1.0 if enabled else 0.0
+        )
+
+    def get_crystalvoice_voice_morph(self) -> Optional[bool]:
+        value = self.get_crystalvoice_param(protocol.PARAM_CV_VOICE_MORPH_ENABLED)
+        return None if value is None else bool(value)
+
+    def set_crystalvoice_mic_equalizer(self, enabled: bool) -> bool:
+        return self.set_crystalvoice_param(
+            protocol.PARAM_CV_MIC_EQ_ENABLED, 1.0 if enabled else 0.0
+        )
+
+    def get_crystalvoice_mic_equalizer(self) -> Optional[bool]:
+        value = self.get_crystalvoice_param(protocol.PARAM_CV_MIC_EQ_ENABLED)
+        return None if value is None else bool(value)
+
     # ------------------------------------------------------------------
     # Not yet reverse-engineered functions
     # ------------------------------------------------------------------

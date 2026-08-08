@@ -158,6 +158,26 @@ writes; the card's ACK is ``5a 02 0a 12 00 ...``
 ACK layout doesn't follow ``0x26``'s). No USB reset is triggered by these
 writes. See :mod:`soundblaster_g8.sound_modes` for the sequences extracted
 from the captures and :func:`build_set_float` for the encoding.
+
+CrystalVoice parameters (same 0x12 frame, marker ``TLV_CRYSTALVOICE``)
+----------------------------------------------------------------------
+CrystalVoice reuses the same numeric param ids as the equalizer, which is
+exactly why the marker (0x95 instead of 0x96) has to be part of the key -
+see :class:`DecodedState`. From the ``CrystalVoice-*.pcapng`` captures:
+
+    param 0x00        : Acoustic Echo Cancellation (0/1)
+    param 0x04        : Noise Reduction (0/1)
+    param 0x05        : Noise Reduction level, 0.0-1.0
+    param 0x0a        : Voice Morph on/off (0/1)
+    params 0x0b..0x12 : the 8 Voice Morph parameters (one preset)
+    param 0x13        : Microphone Equalizer on/off (0/1)
+    params 0x14..0x1d : the 10 Microphone Equalizer bands, in dB
+    param 0x2c        : Smart Volume (0/1)
+
+Like a sound mode, a Voice Morph / Microphone Equalizer preset is just an
+ordered sequence of these writes - the enable bit (0x0a / 0x13) is
+**never** part of it, so a preset applied while the feature is off is
+ACK'd but inaudible. See :mod:`soundblaster_g8.crystalvoice_presets`.
 """
 
 from __future__ import annotations
@@ -232,7 +252,16 @@ EQ_BAND_PARAMS = tuple(range(0x0B, 0x15))  # the 10 bands, in dB
 PARAM_CV_ECHO_CANCELLATION = 0x00  # Acoustic Echo Cancellation on/off
 PARAM_CV_NOISE_REDUCTION_ENABLED = 0x04  # Noise Reduction on/off
 PARAM_CV_NOISE_REDUCTION_LEVEL = 0x05  # Noise Reduction level, 0.0-1.0
+PARAM_CV_VOICE_MORPH_ENABLED = 0x0A  # Voice Morph on/off
+PARAM_CV_MIC_EQ_ENABLED = 0x13  # Microphone Equalizer on/off
 PARAM_CV_SMART_VOICE = 0x2C  # Smart Volume on/off
+
+#: The 8 Voice Morph parameters, written as an ordered block by a preset
+#: (see :mod:`soundblaster_g8.crystalvoice_presets`).
+CV_VOICE_MORPH_PARAMS = tuple(range(0x0B, 0x13))
+
+#: The 10 Microphone Equalizer bands, in dB (same idea).
+CV_MIC_EQ_BAND_PARAMS = tuple(range(0x14, 0x1E))
 
 #: Constant prefix observed in every SET FLOAT write.
 SET_FLOAT_PREFIX = 0x01
