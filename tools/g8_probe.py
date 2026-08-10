@@ -301,6 +301,17 @@ def cmd_selftest() -> int:
         protocol.build_set_crystalvoice_float(protocol.PARAM_CV_SMART_VOICE, 0.0).hex(),
         "5a120701952c00000000",
     )
+    # The three decoder modes, byte for byte from Decodeur.pcapng.
+    for mode_name, mode_value, expected in (
+        ("Normal", 1.0, "5a12070197020000803f"),
+        ("Full", 3.0, "5a120701970200004040"),
+        ("Night", 2.0, "5a120701970200000040"),
+    ):
+        ok &= _check(
+            f"SET_FLOAT (Decoder {mode_name})",
+            protocol.build_set_decoder_float(protocol.PARAM_DECODER_MODE, mode_value).hex(),
+            expected,
+        )
     ok &= _check(
         "Generated sound modes",
         len(SOUND_MODES) > 0,

@@ -20,7 +20,23 @@ from .driver import PRODUCT_ID, VENDOR_ID, SoundBlasterG8Driver, get_driver
 from .sound_modes import DEFAULT_SOUND_MODE, SOUND_MODES
 
 #: Features whose USB frame has been identified and validated on hardware.
-SUPPORTED_FEATURES = frozenset({"scout_mode", "direct_mode", "sound_mode", "eq", "crystalvoice"})
+SUPPORTED_FEATURES = frozenset(
+    {"scout_mode", "direct_mode", "sound_mode", "eq", "crystalvoice", "decoder"}
+)
+
+#: Dolby Digital decoder modes, as ``(slug, label, written f32 value)``, in
+#: the Creative application's display order. The values are the ones observed
+#: in ``Decodeur.pcapng`` (Normal, Full then Night clicked in that order):
+#: they are deliberately not contiguous with the display order.
+DECODER_MODES = (
+    ("normal", "Normal", 1.0),
+    ("full", "Full", 3.0),
+    ("night", "Night", 2.0),
+)
+
+#: Mode assumed active as long as the card hasn't reported one (no read
+#: frame exists, same as for Scout Mode / Sound Mode).
+DEFAULT_DECODER_MODE = "normal"
 
 #: "Tilt" weights for the Bass/Treble sliders (bands 0x0b..0x14, in that
 #: order). These two sliders have no dedicated parameter on the card: in
@@ -70,6 +86,7 @@ class SoundBlasterController:
         self._eq_bass: float = 0.0
         self._eq_treble: float = 0.0
         self._sound_mode: str = DEFAULT_SOUND_MODE
+        self._decoder_mode: str = DEFAULT_DECODER_MODE
 
         # Listeners for events (to notify the GUI)
         self._listeners: dict[str, list[Callable]] = {
@@ -90,6 +107,7 @@ class SoundBlasterController:
             "eq_bass_changed": [],
             "eq_treble_changed": [],
             "sound_mode_changed": [],
+            "decoder_mode_changed": [],
             "command_failed": [],
             # (bool): True when the card is re-enumerating (Direct Mode
             # toggle), False when the reconnection is complete.
@@ -183,6 +201,17 @@ class SoundBlasterController:
             preamp = None
         if preamp is not None:
             self._eq_preamp = preamp
+
+        try:
+            decoder_value = self._driver.get_decoder_mode_value()
+        except Exception as exc:
+            print(f"[SoundBlasterController] Unable to read _decoder_mode: {exc}")
+            decoder_value = None
+        if decoder_value is not None:
+            for slug, _label, value in DECODER_MODES:
+                if value == decoder_value:
+                    self._decoder_mode = slug
+                    break
 
         print("[SoundBlasterController] Initial state loaded")
 
@@ -306,6 +335,40 @@ class SoundBlasterController:
             self._notify("eq_treble_changed", 0.0)
         else:
             self._notify("command_failed", "sound_mode", slug)
+        return ok
+
+    # ------------------------------------------------------------------
+    # Decoder (supported)
+    # ------------------------------------------------------------------
+
+    def list_decoder_modes(self) -> list[tuple[str, str]]:
+        """``(slug, label)`` list of the decoder's Dynamic Range Control modes."""
+        return [(slug, label) for slug, label, _value in DECODER_MODES]
+
+    def get_decoder_mode(self) -> str:
+        """Active decoder mode's slug (local state only).
+
+        Same limitation as :meth:`get_sound_mode`: the card has no read
+        command for it, so this tracks the last successfully sent command.
+        """
+        return self._decoder_mode
+
+    def set_decoder_mode(self, slug: str) -> bool:
+        """Applies a decoder mode (single CMD_SET_FLOAT write, marker 0x97).
+
+        Returns:
+            ``True`` if the card acknowledged the command.
+        """
+        value = next((v for s, _label, v in DECODER_MODES if s == slug), None)
+        if value is None:
+            raise ValueError(f"Unknown decoder mode: {slug}")
+
+        ok = bool(self._driver.set_decoder_mode(value))
+        if ok:
+            self._decoder_mode = slug
+            self._notify("decoder_mode_changed", slug)
+        else:
+            self._notify("command_failed", "decoder_mode", slug)
         return ok
 
     # ------------------------------------------------------------------

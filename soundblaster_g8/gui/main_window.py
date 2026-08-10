@@ -9,9 +9,10 @@ reset on the card and takes 2 to 4 seconds, which would freeze the window if
 done in the Tk callback. The result is brought back to the GUI thread via
 ``self.after(0, ...)``.
 
-The window holds three "pages" (main page / Equalizer page / CrystalVoice
-page) in the same container, only one packed at a time (no floating
-window): see ``_show_main_page``/``_show_eq_page``/``_show_cv_page``.
+The window holds four "pages" (main page / Equalizer page / CrystalVoice
+page / Decoder page) in the same container, only one packed at a time (no
+floating window): see ``_show_main_page``/``_show_eq_page``/``_show_cv_page``/
+``_show_decoder_page``.
 """
 
 import threading
@@ -22,6 +23,7 @@ from typing import Callable, Optional
 from ..controller import SoundBlasterController
 from . import i18n, theme, widgets
 from .crystalvoice_panel import CrystalVoicePanel
+from .decoder_panel import DecoderPanel
 from .eq_panel import EQPanel
 
 MIN_WINDOW_WIDTH = 640
@@ -67,6 +69,11 @@ class MainWindow(tk.Tk):
         self._toggle_rows: dict[str, dict] = {}
         self._eq_enabled = True
         self._cv_enabled = True
+        self._decoder_enabled = True
+
+        # Title of the page currently shown, as (msgid, font), so it can be
+        # re-rendered in place when the language changes (see _show_page).
+        self._current_title: tuple[str, tuple] = ("Sound Blaster G8", theme.FONT_TITLE)
 
         # Last status message shown, as (msgid_template, kwargs), so it can
         # be re-rendered in place when the language changes.
@@ -90,11 +97,14 @@ class MainWindow(tk.Tk):
         self._main_page = tk.Frame(self._pages_container, bg=theme.BG_WINDOW)
         self._eq_page = tk.Frame(self._pages_container, bg=theme.BG_WINDOW)
         self._cv_page = tk.Frame(self._pages_container, bg=theme.BG_WINDOW)
+        self._decoder_page = tk.Frame(self._pages_container, bg=theme.BG_WINDOW)
+        self._pages = (self._main_page, self._eq_page, self._cv_page, self._decoder_page)
 
         self._setup_main_page(self._main_page)
-        # EQPanel/CrystalVoicePanel need the controller: built in _init_controller.
+        # The panels need the controller: built in _init_controller.
         self._eq_panel: Optional[EQPanel] = None
         self._cv_panel: Optional[CrystalVoicePanel] = None
+        self._decoder_panel: Optional[DecoderPanel] = None
 
         # Status bar (shared between both pages)
         status_bar = tk.Frame(self, bg=theme.BG_WINDOW)
@@ -202,6 +212,8 @@ class MainWindow(tk.Tk):
         self._direct_toggle_switch = self._toggle_rows["direct_mode"]["switch"]
         self._scout_toggle_switch = self._toggle_rows["scout_mode"]["switch"]
 
+        self._build_decoder_row(left)
+
         self._build_sound_mode_row(right)
         self._build_equalizer_row(right)
         self._build_crystalvoice_row(right)
@@ -301,6 +313,18 @@ class MainWindow(tk.Tk):
         self._bind_click_recursive(row, self._on_cv_row_click)
         self._set_row_cursor(row, "hand2")
 
+    def _build_decoder_row(self, parent):
+        """Clickable "Decoder" row (badge + title + active mode), no card background."""
+        row, badge, title_label, subtitle_label = self._build_row_icon_text(
+            parent, "decoder", i18n._("Decoder"), "", subtitle_wrap=280,
+        )
+        self._decoder_row = row
+        self._decoder_nav_badge = badge
+        self._decoder_nav_title = title_label
+        self._decoder_nav_subtitle = subtitle_label
+        self._bind_click_recursive(row, self._on_decoder_row_click)
+        self._set_row_cursor(row, "hand2")
+
     def _bind_click_recursive(self, widget, handler) -> None:
         widget.bind("<Button-1>", handler)
         for child in widget.winfo_children():
@@ -336,6 +360,19 @@ class MainWindow(tk.Tk):
         self._cv_nav_subtitle.config(fg=theme.FG_SECONDARY if enabled else theme.FG_THUMB_DISABLED)
         self._set_row_cursor(self._cv_row, "hand2" if enabled else "arrow")
 
+    def _on_decoder_row_click(self, _event=None):
+        if self._decoder_enabled:
+            self._show_decoder_page()
+
+    def _set_decoder_nav_enabled(self, enabled: bool) -> None:
+        self._decoder_enabled = enabled
+        self._decoder_nav_badge.set_enabled(enabled)
+        self._decoder_nav_title.config(fg=theme.FG_PRIMARY if enabled else theme.FG_THUMB_DISABLED)
+        self._decoder_nav_subtitle.config(
+            fg=theme.FG_SECONDARY if enabled else theme.FG_THUMB_DISABLED
+        )
+        self._set_row_cursor(self._decoder_row, "hand2" if enabled else "arrow")
+
     def _on_language_change(self, index: int) -> None:
         """Handles a language-selector change; persists and re-renders everything in place."""
         if 0 <= index < len(self._lang_codes):
@@ -346,12 +383,8 @@ class MainWindow(tk.Tk):
         self.title(i18n._("Sound Blaster G8 - Control"))
         self._back_button.set_text(i18n._("←  Back"))
 
-        if self._eq_page.winfo_ismapped():
-            self._title_label.config(text=i18n._("Equalizer"), font=theme.FONT_TITLE_EQ)
-        elif self._cv_page.winfo_ismapped():
-            self._title_label.config(text=i18n._("CrystalVoice"), font=theme.FONT_TITLE_EQ)
-        else:
-            self._title_label.config(text=i18n._("Sound Blaster G8"), font=theme.FONT_TITLE)
+        title_msgid, title_font = self._current_title
+        self._title_label.config(text=i18n._(title_msgid), font=title_font)
 
         for key, row in self._toggle_rows.items():
             row["title"].config(text=i18n._(row["title_msgid"]))
@@ -374,6 +407,11 @@ class MainWindow(tk.Tk):
             cv_subtitle = f"{cv_subtitle}\n{i18n._('(not implemented)')}"
         self._cv_nav_subtitle.config(text=cv_subtitle)
 
+        # Like the Equalizer row, the Decoder row's subtitle is its active
+        # mode (refreshed below): unavailability is signalled by greying the
+        # row out, not by an extra line of text.
+        self._decoder_nav_title.config(text=i18n._("Decoder"))
+
         if self._controller is not None:
             modes = self._controller.list_sound_modes()
             self._sound_mode_slugs = [slug for slug, _label in modes]
@@ -381,12 +419,16 @@ class MainWindow(tk.Tk):
             self._sound_mode_select.set_values(self._sound_mode_labels)
             self._select_sound_mode(self._controller.get_sound_mode())
             self._update_eq_button_label()
+            self._update_decoder_row_label()
 
         if self._eq_panel is not None:
             self._eq_panel.retranslate()
 
         if self._cv_panel is not None:
             self._cv_panel.retranslate()
+
+        if self._decoder_panel is not None:
+            self._decoder_panel.retranslate()
 
         self._render_status()
 
@@ -406,6 +448,7 @@ class MainWindow(tk.Tk):
         self._sound_mode_select.set_values(self._sound_mode_labels)
         self._select_sound_mode(self._controller.get_sound_mode())
         self._update_eq_button_label()
+        self._update_decoder_row_label()
 
         self._eq_panel = EQPanel(
             self._eq_page, self._controller,
@@ -418,6 +461,12 @@ class MainWindow(tk.Tk):
             status_callback=self._set_status,
         )
         self._cv_panel.pack(fill=tk.BOTH, expand=True)
+
+        self._decoder_panel = DecoderPanel(
+            self._decoder_page, self._controller,
+            status_callback=self._set_status,
+        )
+        self._decoder_panel.pack(fill=tk.BOTH, expand=True)
 
         if self._controller.connect():
             info = self._controller.get_debug_info()
@@ -463,6 +512,10 @@ class MainWindow(tk.Tk):
             self._unavailable.add("crystalvoice")
             self._set_cv_nav_enabled(False)
 
+        if not self._controller.is_feature_supported("decoder"):
+            self._unavailable.add("decoder")
+            self._set_decoder_nav_enabled(False)
+
     def _load_current_state(self):
         """Loads the current state from the controller."""
         if not self._controller:
@@ -473,6 +526,7 @@ class MainWindow(tk.Tk):
         self._scout_mode_var.set(self._controller.get_scout_mode())
         self._select_sound_mode(self._controller.get_sound_mode())
         self._update_eq_button_label()
+        self._update_decoder_row_label()
 
     def _select_sound_mode(self, slug: str) -> None:
         """Sets the SplitSelect to the given sound mode (without firing the event)."""
@@ -491,37 +545,66 @@ class MainWindow(tk.Tk):
                 break
         self._eq_nav_subtitle.config(text=label)
 
+    def _update_decoder_row_label(self) -> None:
+        """Refreshes the Decoder row's subtitle with the active mode."""
+        if not self._controller:
+            return
+        slug = self._controller.get_decoder_mode()
+        label = slug
+        for mode_slug, mode_label in self._controller.list_decoder_modes():
+            if mode_slug == slug:
+                label = i18n.decoder_mode_label(mode_slug, mode_label)
+                break
+        self._decoder_nav_subtitle.config(text=label)
+
     # ------------------------------------------------------------------
     # Navigation between pages (no floating window)
     # ------------------------------------------------------------------
 
+    def _show_page(self, page: tk.Frame, title_msgid: str, title_font: tuple) -> None:
+        """Shows one page of ``self._pages``, hiding the others.
+
+        The back button is shown on every page but the main one, and the
+        title is remembered as a msgid so ``_retranslate`` can re-render it
+        in the new language without knowing which page is up.
+        """
+        for other in self._pages:
+            if other is not page:
+                other.pack_forget()
+
+        if page is self._main_page:
+            self._back_button.place_forget()
+        else:
+            self._back_button.place(x=24, rely=0.5, anchor="w")
+
+        self._current_title = (title_msgid, title_font)
+        self._title_label.config(text=i18n._(title_msgid), font=title_font)
+        page.pack(expand=True, fill=tk.BOTH)
+        self._fit_window_to_page()
+
     def _show_main_page(self):
         """Shows the main page (hides the back button)."""
-        self._eq_page.pack_forget()
-        self._cv_page.pack_forget()
-        self._back_button.place_forget()
-        self._title_label.config(text=i18n._("Sound Blaster G8"), font=theme.FONT_TITLE)
-        self._main_page.pack(expand=True, fill=tk.BOTH)
-        self._fit_window_to_page()
+        # The Decoder row's subtitle is the active mode: it may have been
+        # changed on the Decoder page we're coming back from.
+        self._update_decoder_row_label()
+        self._show_page(self._main_page, "Sound Blaster G8", theme.FONT_TITLE)
 
     def _show_eq_page(self):
         """Shows the Equalizer page (with a back button at the top left)."""
-        self._main_page.pack_forget()
-        self._back_button.place(x=24, rely=0.5, anchor="w")
-        self._title_label.config(text=i18n._("Equalizer"), font=theme.FONT_TITLE_EQ)
-        self._eq_page.pack(expand=True, fill=tk.BOTH)
-        self._fit_window_to_page()
+        self._show_page(self._eq_page, "Equalizer", theme.FONT_TITLE_EQ)
         self._prepare_eq_page_async()
 
     def _show_cv_page(self):
         """Shows the CrystalVoice page (with a back button at the top left)."""
-        self._main_page.pack_forget()
-        self._back_button.place(x=24, rely=0.5, anchor="w")
-        self._title_label.config(text=i18n._("CrystalVoice"), font=theme.FONT_TITLE_EQ)
-        self._cv_page.pack(expand=True, fill=tk.BOTH)
-        self._fit_window_to_page()
+        self._show_page(self._cv_page, "CrystalVoice", theme.FONT_TITLE_EQ)
         if self._cv_panel is not None:
             self._cv_panel.refresh()
+
+    def _show_decoder_page(self):
+        """Shows the Decoder page (with a back button at the top left)."""
+        self._show_page(self._decoder_page, "Decoder", theme.FONT_TITLE_EQ)
+        if self._decoder_panel is not None:
+            self._decoder_panel.refresh()
 
     def _prepare_eq_page_async(self):
         """Prepares the equalizer (enables + applies a flat state if needed).

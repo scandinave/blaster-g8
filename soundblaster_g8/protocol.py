@@ -178,6 +178,18 @@ Like a sound mode, a Voice Morph / Microphone Equalizer preset is just an
 ordered sequence of these writes - the enable bit (0x0a / 0x13) is
 **never** part of it, so a preset applied while the feature is off is
 ACK'd but inaudible. See :mod:`soundblaster_g8.crystalvoice_presets`.
+
+Decoder parameters (same 0x12 frame, marker ``TLV_DECODER``)
+------------------------------------------------------------
+The Dolby Digital decoder's Dynamic Range Control is a third namespace on
+the same frame, with marker 0x97. From ``Decodeur.pcapng`` (one write per
+click, each ACK'd by ``5a 02 0a 12 00`` then echoed in a 0x11 dump):
+
+    param 0x02        : DRC mode, 1.0 = Normal, 3.0 = Full, 2.0 = Night
+
+The values aren't contiguous with the display order (Normal, Full, Night):
+they were read from the capture, not inferred. As for Scout Mode and Sound
+Mode, no read frame for the active mode was observed.
 """
 
 from __future__ import annotations
@@ -221,6 +233,10 @@ TLV_FLOAT = 0x96
 #: CrystalVoice-*.pcapng captures).
 TLV_CRYSTALVOICE = 0x95
 
+#: Marker for the Dolby Digital decoder's parameters (third namespace, same
+#: rationale as TLV_CRYSTALVOICE - see Decodeur.pcapng).
+TLV_DECODER = 0x97
+
 # ACK statuses
 STATUS_OK = 0x00
 
@@ -262,6 +278,10 @@ CV_VOICE_MORPH_PARAMS = tuple(range(0x0B, 0x13))
 
 #: The 10 Microphone Equalizer bands, in dB (same idea).
 CV_MIC_EQ_BAND_PARAMS = tuple(range(0x14, 0x1E))
+
+# Decoder - parameter identifier extracted from Decodeur.pcapng
+# (CMD_SET_FLOAT, marker TLV_DECODER).
+PARAM_DECODER_MODE = 0x02  # Dynamic Range Control mode (1 / 2 / 3)
 
 #: Constant prefix observed in every SET FLOAT write.
 SET_FLOAT_PREFIX = 0x01
@@ -549,6 +569,15 @@ def build_set_crystalvoice_float(param: int, value: float) -> bytes:
     '5a12070195040000803f'
     """
     return build_set_float(param, value, marker=TLV_CRYSTALVOICE)
+
+
+def build_set_decoder_float(param: int, value: float) -> bytes:
+    """SET FLOAT command for a decoder parameter (marker TLV_DECODER).
+
+    >>> build_set_decoder_float(PARAM_DECODER_MODE, 1.0).hex()
+    '5a12070197020000803f'
+    """
+    return build_set_float(param, value, marker=TLV_DECODER)
 
 
 def build_direct_mode_status() -> bytes:

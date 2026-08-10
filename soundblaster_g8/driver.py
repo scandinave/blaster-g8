@@ -904,28 +904,39 @@ class SoundBlasterG8Driver:
     # Sound mode / equalizer (confirmed by the "Sound Mode" captures)
     # ------------------------------------------------------------------
 
-    def set_sound_mode_param(self, param: int, value: float) -> bool:
-        """Sends a single CMD_SET_FLOAT write and checks the ACK."""
+    def _set_float_param(self, marker: int, param: int, value: float, tag: str) -> bool:
+        """Sends a single CMD_SET_FLOAT write and checks the ACK.
+
+        Shared body of the three float namespaces (sound mode/EQ, CrystalVoice
+        and decoder): they differ only by the TLV marker and by the ``tag``
+        prefixing their log lines.
+        """
         if self._device is None:
-            _log(f"[simulation] SET_FLOAT param=0x{param:02x} value={value}")
+            _log(f"[simulation] {tag}SET_FLOAT param=0x{param:02x} value={value}")
             return False
 
         try:
             # build_set_float() returns an already-complete frame (like
             # build_direct_mode()): go through _send_raw directly, not
             # send_frame() which would re-wrap the payload in a frame.
-            ack = self._send_raw(protocol.build_set_float(param, value), expect="ack")
+            ack = self._send_raw(
+                protocol.build_set_float(param, value, marker=marker), expect="ack"
+            )
         except SoundBlasterG8Error as exc:
-            _log(f"SET_FLOAT ERROR param=0x{param:02x}: {exc}")
+            _log(f"{tag}SET_FLOAT ERROR param=0x{param:02x}: {exc}")
             return False
 
         if ack is None or ack.ack_command != protocol.CMD_SET_FLOAT or not ack.ack_ok:
             _log(
-                f"WARNING: no valid ACK for param=0x{param:02x} "
+                f"WARNING: no valid ACK for {tag}param=0x{param:02x} "
                 f"({ack.describe() if ack else 'timeout'})"
             )
             return False
         return True
+
+    def set_sound_mode_param(self, param: int, value: float) -> bool:
+        """Sends a single CMD_SET_FLOAT write and checks the ACK."""
+        return self._set_float_param(protocol.TLV_FLOAT, param, value, "")
 
     def set_sound_mode(self, writes: list[tuple[int, float]]) -> bool:
         """Replays a sequence of CMD_SET_FLOAT writes (a sound mode).
@@ -992,25 +1003,7 @@ class SoundBlasterG8Driver:
         Same mechanism as :meth:`set_sound_mode_param`, but with the
         TLV_CRYSTALVOICE marker (0x95) instead of TLV_FLOAT (0x96).
         """
-        if self._device is None:
-            _log(f"[simulation] CV SET_FLOAT param=0x{param:02x} value={value}")
-            return False
-
-        try:
-            ack = self._send_raw(
-                protocol.build_set_crystalvoice_float(param, value), expect="ack"
-            )
-        except SoundBlasterG8Error as exc:
-            _log(f"CV SET_FLOAT ERROR param=0x{param:02x}: {exc}")
-            return False
-
-        if ack is None or ack.ack_command != protocol.CMD_SET_FLOAT or not ack.ack_ok:
-            _log(
-                f"WARNING: no valid ACK for CV param=0x{param:02x} "
-                f"({ack.describe() if ack else 'timeout'})"
-            )
-            return False
-        return True
+        return self._set_float_param(protocol.TLV_CRYSTALVOICE, param, value, "CV ")
 
     def get_crystalvoice_param(self, param: int) -> Optional[float]:
         """Last known value of a CrystalVoice parameter (from the notification cache)."""
@@ -1085,6 +1078,25 @@ class SoundBlasterG8Driver:
     def get_crystalvoice_mic_equalizer(self) -> Optional[bool]:
         value = self.get_crystalvoice_param(protocol.PARAM_CV_MIC_EQ_ENABLED)
         return None if value is None else bool(value)
+
+    # ------------------------------------------------------------------
+    # Decoder (confirmed by the Decodeur.pcapng capture)
+    # ------------------------------------------------------------------
+
+    def set_decoder_mode(self, value: float) -> bool:
+        """Writes the decoder's Dynamic Range Control mode (marker 0x97).
+
+        ``value`` is the raw float read from the capture (see
+        ``controller.DECODER_MODES``), not an index.
+        """
+        return self._set_float_param(
+            protocol.TLV_DECODER, protocol.PARAM_DECODER_MODE, value, "decoder "
+        )
+
+    def get_decoder_mode_value(self) -> Optional[float]:
+        """Last known decoder mode value (same limitation as :meth:`get_crystalvoice_param`)."""
+        self.poll()
+        return self._state.params.get((protocol.TLV_DECODER, protocol.PARAM_DECODER_MODE))
 
     # ------------------------------------------------------------------
     # Not yet reverse-engineered functions

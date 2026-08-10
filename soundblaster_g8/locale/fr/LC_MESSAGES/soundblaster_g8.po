@@ -305,3 +305,36 @@ msgstr "{label} : envoi de {value:.0f} %…"
 
 msgid "{label}: {value:.0f}% applied"
 msgstr "{label} : {value:.0f} % appliqué"
+
+#. Decoder page (Dolby Digital Dynamic Range Control).
+msgid "Decoder"
+msgstr "Décodeur"
+
+msgid "decoder_mode.normal"
+msgstr "Normal"
+
+msgid "decoder_mode.full"
+msgstr "Complet"
+
+msgid "decoder_mode.night"
+msgstr "Nuit"
+
+msgid ""
+"Play your Dolby Digital media with ease using this integrated decoder. With "
+"the Dynamic Range Control, wide volume swings between loud and quiet sounds "
+"can be customized to match your listening preferences, all without the loss "
+"of overall sound quality."
+msgstr ""
+"Profitez simplement de vos contenus Dolby Digital grâce à ce décodeur "
+"intégré. Avec le contrôle de la plage dynamique, les grands écarts de volume "
+"entre les sons forts et les sons faibles s'adaptent à vos préférences "
+"d'écoute, sans aucune perte de qualité sonore globale."
+
+msgid "{label}: sending \"{mode}\"…"
+msgstr "{label} : envoi de « {mode} »…"
+
+msgid "{label}: \"{mode}\" applied"
+msgstr "{label} : « {mode} » appliqué"
+
+msgid "{label}: \"{mode}\" failed (see console)"
+msgstr "{label} : échec de « {mode} » (voir la console)"

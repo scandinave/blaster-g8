@@ -15,6 +15,7 @@ on **macOS** and **Linux** (Windows possible via hidapi, untested).
 | **CrystalVoice** (Noise Reduction, Acoustic Echo Cancellation, Smart Volume) | ✅ Working | `0x12` frame per parameter, same mechanism as the equalizer but with a dedicated TLV marker (`0x95`), reverse-engineered from the `CrystalVoice-*.pcapng` captures |
 | **Voice Morph** | ✅ Working | 18 presets replayed as a sequence of 8 `0x12` writes (marker `0x95`), plus a dedicated on/off parameter |
 | **Microphone Equalizer** | ✅ Working | 9 presets replayed as a sequence of 10 `0x12` writes (marker `0x95`), plus a dedicated on/off parameter |
+| **Decoder** (Dolby Digital, Dynamic Range Control) | ✅ Working | 3 modes (Normal / Full / Night), one `0x12` write with a third TLV marker (`0x97`), reverse-engineered from `Decodeur.pcapng` |
 
 Unimplemented features are greyed out in the interface: they don't
 pretend to act on the card until the corresponding frame has been
@@ -415,6 +416,25 @@ band values `(0, 0, 2, 2, -2, 0, -4, 4, 0, 0)`. This was reproduced across two
 separate capture sessions, so it is kept as-is rather than treated as a
 capture error.
 
+### Decoder (Dolby Digital Dynamic Range Control)
+
+A third float namespace on the same `CMD_SET_FLOAT` frame, with marker
+**`0x97`**. One click on a mode = one write, acknowledged then echoed in the
+`0x11` dump, as captured in `Decodeur.pcapng`:
+
+```
+Normal : 5a 12 07 01 97 02 00 00 80 3f   (param 0x02 = 1.0)
+Full   : 5a 12 07 01 97 02 00 00 40 40   (param 0x02 = 3.0)
+Night  : 5a 12 07 01 97 02 00 00 00 40   (param 0x02 = 2.0)
+ACK    : 5a 02 0a 12 00 ...
+dump   : 5a 11 08 01 00 97 02 <f32>      (kind=0x97, param=0x02)
+```
+
+The values are **not** contiguous with the display order (Normal, Full,
+Night): they are read from the capture, not inferred. As for Scout Mode and
+Sound Mode, no read frame for the active mode has been observed, so the GUI
+tracks the last acknowledged command (`controller.DECODER_MODES`).
+
 ## Contributing to the reverse engineering
 
 To add a feature (Direct Mode, CrystalVoice, EQ...):
@@ -495,6 +515,7 @@ OpenCreativeApp/
         ├── main_window.py
         ├── eq_panel.py
         ├── crystalvoice_panel.py
+        ├── decoder_panel.py
         └── i18n.py               # translation loader/API
 ```
 

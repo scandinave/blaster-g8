@@ -80,6 +80,23 @@ def draw_icon(canvas: tk.Canvas, name: str, x0: float, y0: float, x1: float, y1:
         )
         for bx, by, bw, bh in bars:
             canvas.create_rectangle(bx, by, bx + bw, by + bh, fill=color, outline="")
+    elif name == "decoder":
+        # Speaker cone + two radiating arcs (Dolby decoder / DRC).
+        canvas.create_polygon(
+            x0 + w * 2 / 18, y0 + h * 7 / 18,
+            x0 + w * 5 / 18, y0 + h * 7 / 18,
+            x0 + w * 8 / 18, y0 + h * 3 / 18,
+            x0 + w * 8 / 18, y0 + h * 15 / 18,
+            x0 + w * 5 / 18, y0 + h * 11 / 18,
+            x0 + w * 2 / 18, y0 + h * 11 / 18,
+            fill=color, outline="",
+        )
+        for span in (5, 8):
+            canvas.create_arc(
+                cx - w * span / 18, cy - h * span / 18,
+                cx + w * span / 18, cy + h * span / 18,
+                start=-55, extent=110, style=tk.ARC, outline=color, width=1.6,
+            )
     elif name == "reset":
         canvas.create_arc(
             x0 + w * 0.08, y0 + h * 0.08, x1 - w * 0.22, y1 - h * 0.08,
@@ -344,6 +361,11 @@ class RoundedButton(tk.Canvas):
     def set_text(self, text: str) -> None:
         self._text = text
         self._resize_to_text()
+        self._redraw()
+
+    def set_fill(self, fill: str) -> None:
+        """Changes the button's background (used to mark a selected choice)."""
+        self._fill = fill
         self._redraw()
 
     def _redraw(self) -> None:
