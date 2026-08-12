@@ -11,17 +11,39 @@
 # localized) instead of parsing `aplay -l` text output: the latter is
 # localized (e.g. "carte" instead of "card" on French locales) and breaks
 # name-based matching entirely on non-English systems.
+#
+# Usage: soundblaster-g8-alsa-fix.sh [--now]
+#   --now   skip the settling delay (see below). For interactive use on a card
+#           that has been up for a while, not for the udev path.
 
 VENDOR_PRODUCT="041e:329b"
 LOG_TAG="soundblaster-g8-alsa-fix"
 MAX_RETRIES=10
 RETRY_DELAY=1
 
+# Writing to the G8's ALSA mixer while it is still settling after a
+# re-enumeration knocks it out of Direct Mode. Measured on hardware: the write
+# below at 17 ms after the card registers kills Direct Mode; the identical
+# write 5 s later leaves it untouched.
+#
+# That matters here specifically because toggling Direct Mode *re-enumerates
+# the card*, which is precisely the event this script is triggered on. Without
+# the delay, enabling Direct Mode - from the app or from the card's physical
+# button - reverted on its own after a second or two, every time.
+SETTLE_DELAY=${SOUNDBLASTER_G8_SETTLE_DELAY:-5}
+[ "${1:-}" = "--now" ] && SETTLE_DELAY=0
+
 log() {
     if command -v logger > /dev/null 2>&1; then
         logger -t "$LOG_TAG" "$1"
     fi
 }
+
+# Let the card settle before touching it at all. Done before card discovery so
+# the index is resolved from the state the write will actually target.
+if [ "$SETTLE_DELAY" -gt 0 ] 2>/dev/null; then
+    sleep "$SETTLE_DELAY"
+fi
 
 # Find the card index. Retry because ALSA enumeration may still be settling.
 card_index=""

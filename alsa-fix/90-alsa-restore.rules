@@ -1,0 +1,39 @@
+# Overrides alsa-utils' /usr/lib/udev/rules.d/90-alsa-restore.rules to skip the
+# Sound Blaster G8. udev merges rule files by name, /etc winning over /usr/lib,
+# so this file replaces the distro one wholesale.
+#
+# Why: `alsactl restore` rewrites a card's whole saved mixer state the moment
+# the card registers. On the G8, any ALSA mixer write in the few seconds after
+# a re-enumeration knocks it out of Direct Mode - and toggling Direct Mode is
+# itself a re-enumeration. Measured on hardware: Direct Mode never survived
+# with this rule active, whether toggled from the app or from the card's own
+# physical button, and always survived with it excluded.
+#
+# Unlike the fix script, `alsactl restore` cannot simply be delayed: udev runs
+# RUN+= programs unconditionally and there is no way to reorder or postpone
+# them from another rule file. Dropping the card's section from
+# /var/lib/alsa/asound.state does not help either - alsactl then falls back to
+# `init`, which writes too (tested).
+#
+# Everything below the skip line is verbatim from alsa-utils 1.2.9-1ubuntu5
+# (file dated 2024-04-07). If alsa-utils ever changes it, re-sync this copy.
+#
+# Cost of skipping: the G8's mixer levels are no longer restored at boot by
+# ALSA. In practice PipeWire/WirePlumber owns volumes on a desktop system.
+#
+# Worth knowing: the G8 has two USB inputs, and the mixer control set it
+# exposes depends on which are connected - 19 controls were observed on one
+# configuration, 29 on another, with different numids for the same control
+# names. A state snapshot taken in one configuration therefore does not
+# necessarily describe the card in another.
+
+ACTION=="add", SUBSYSTEM=="sound", KERNEL=="controlC*", ATTRS{idVendor}=="041e", ATTRS{idProduct}=="329b", GOTO="alsa_restore_end"
+
+ACTION=="add", SUBSYSTEM=="sound", KERNEL=="controlC*", KERNELS!="card*", TEST=="/usr/sbin", TEST=="/usr/share/alsa", GOTO="alsa_restore_go"
+GOTO="alsa_restore_end"
+
+LABEL="alsa_restore_go"
+TEST!="/etc/alsa/state-daemon.conf", TEST=="/usr/sbin/alsactl", RUN+="/usr/sbin/alsactl -E HOME=/run/alsa -E XDG_RUNTIME_DIR=/run/alsa/runtime restore $attr{device/number}"
+TEST=="/etc/alsa/state-daemon.conf", TEST=="/usr/sbin/alsactl", RUN+="/usr/sbin/alsactl -E HOME=/run/alsa -E XDG_RUNTIME_DIR=/run/alsa/runtime nrestore $attr{device/number}"
+
+LABEL="alsa_restore_end"

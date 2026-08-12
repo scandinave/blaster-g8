@@ -23,14 +23,23 @@ than by ``numid``, which can be renumbered between driver/kernel versions.
 from __future__ import annotations
 
 import glob
+import os
 import platform
 import subprocess
+import time
 from typing import Optional
 
 CAPTURE_SOURCE_CONTROL = "PCM Capture Source"
 CAPTURE_SOURCE_TARGET = "External Mic"
 
 AMIXER_TIMEOUT_S = 3.0
+
+#: How long the card must have been enumerated before its mixer may be
+#: written to. Writing sooner knocks it out of Direct Mode: measured on
+#: hardware, a write 17 ms after the card registers reverts Direct Mode within
+#: a second or two, the identical write 5 s later leaves it alone. Toggling
+#: Direct Mode re-enumerates the card, which is what makes this reachable.
+SETTLE_DELAY_S = 5.0
 
 
 def _log(message: str) -> None:
@@ -60,14 +69,58 @@ def find_card_index(vendor_id: int, product_id: int) -> Optional[int]:
     return None
 
 
-def ensure_microphone_source(vendor_id: int, product_id: int) -> bool:
+def seconds_since_enumeration(vendor_id: int, product_id: int) -> Optional[float]:
+    """Age of the card's current USB enumeration, in seconds.
+
+    The kernel creates the device's sysfs directory when it enumerates it, and
+    that directory's mtime keeps the timestamp. Checked against the kernel log
+    on real hardware: 276 ms apart, which is ample for a 5 s threshold.
+
+    Returns ``None`` if the card isn't on the bus or sysfs isn't readable
+    (non-Linux, container without /sys): callers treat that as "unknown", not
+    as "settled".
+    """
+    for vendor_path in glob.glob("/sys/bus/usb/devices/*/idVendor"):
+        directory = os.path.dirname(vendor_path)
+        try:
+            with open(vendor_path, "r", encoding="ascii") as f:
+                if int(f.read().strip(), 16) != vendor_id:
+                    continue
+            with open(f"{directory}/idProduct", "r", encoding="ascii") as f:
+                if int(f.read().strip(), 16) != product_id:
+                    continue
+            return max(0.0, time.time() - os.stat(directory).st_mtime)
+        except (OSError, ValueError):
+            continue  # device unplugged mid-read, or unreadable attribute
+    return None
+
+
+def ensure_microphone_source(
+    vendor_id: int,
+    product_id: int,
+    settle_delay: float = SETTLE_DELAY_S,
+) -> bool:
     """Selects ``External Mic`` as the ALSA capture source.
 
     Does nothing (and never raises) outside Linux, if the ALSA card isn't
     found, if ``amixer`` is missing, or if the command fails: this fix is a
     "best effort" that must never prevent the application from starting.
+
+    Also does nothing if the card enumerated less than ``settle_delay``
+    seconds ago, because the write would drop it out of Direct Mode (see
+    :data:`SETTLE_DELAY_S`). It *skips* rather than waits: this runs on the Tk
+    thread from ``controller.connect()`` and must not stall startup. The udev
+    rule in ``alsa-fix/`` covers that window - it can afford to sleep.
     """
     if platform.system() != "Linux":
+        return False
+
+    age = seconds_since_enumeration(vendor_id, product_id)
+    if age is not None and age < settle_delay:
+        _log(
+            f"card enumerated {age:.1f}s ago and is still settling: fix "
+            f"skipped (writing now would drop it out of Direct Mode)"
+        )
         return False
 
     card_index = find_card_index(vendor_id, product_id)
