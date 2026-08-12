@@ -24,6 +24,13 @@ identified (see *Contributing to the reverse engineering* below).
 The interface is bilingual (English/French), with a language selector in
 the header; the choice persists across restarts.
 
+A sidebar on the left holds the application's menu — only **Devices**
+(the card's controls) is implemented so far, *Playback*, *Recording* and
+*Settings* are shown greyed out — and, at its foot, two sliders for the
+PC's own output and microphone volume. Those two act on the system's
+default devices (via `pactl` on Linux, `osascript` on macOS), not on the
+card's registers, and follow changes made elsewhere in the desktop.
+
 ## Installation
 
 ```bash
@@ -504,7 +511,8 @@ OpenCreativeApp/
 ├── tools/compile_translations.py # compiles .po translation catalogs to .mo
 ├── udev/99-soundblaster-g8.rules
 └── soundblaster_g8/
-    ├── hidbackend.py            # hidapi backend selection (only platform-specific code)
+    ├── hidbackend.py            # hidapi backend selection (platform-specific)
+    ├── system_volume.py         # PC volume/microphone (pactl on Linux, osascript on macOS)
     ├── protocol.py               # frame encoding/decoding (no I/O)
     ├── sound_modes.py           # generated sound modes (see extract_sound_modes.py)
     ├── crystalvoice_presets.py  # generated Voice Morph / mic-EQ presets
@@ -513,6 +521,7 @@ OpenCreativeApp/
     ├── locale/                  # EN/FR translation catalogs (.po/.mo)
     └── gui/
         ├── main_window.py
+        ├── sidebar.py            # left navigation menu + PC volume sliders
         ├── eq_panel.py
         ├── crystalvoice_panel.py
         ├── decoder_panel.py
@@ -521,9 +530,14 @@ OpenCreativeApp/
 
 ## Architecture
 
-- **hidbackend.py**: the only platform-dependent module; chooses
-  `hidraw` / `libusb` / IOKit and exposes `enumerate()`, `open_path()`,
-  `backend_name()`, `provides_usage_page()`
+- **hidbackend.py**: chooses `hidraw` / `libusb` / IOKit and exposes
+  `enumerate()`, `open_path()`, `backend_name()`,
+  `provides_usage_page()`
+- **system_volume.py**: the PC's own output/microphone volume (the
+  sidebar sliders), driving the system's *default* device through
+  `pactl` on Linux and `osascript` on macOS; best effort, and simply
+  reports itself unavailable — greying the sliders out — when neither is
+  usable
 - **protocol.py**: pure layer (framing, opcodes, TLV, padding), testable
   without hardware via `--selftest`
 - **driver.py**: HID interface selection, unified transport (SET_REPORT

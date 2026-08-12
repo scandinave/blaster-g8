@@ -338,3 +338,30 @@ msgstr "{label} : « {mode} » appliqué"
 
 msgid "{label}: \"{mode}\" failed (see console)"
 msgstr "{label} : échec de « {mode} » (voir la console)"
+
+#. Sidebar: main menu entries. Only "Devices" is implemented so far; the
+#. other three are shown greyed out.
+msgid "Devices"
+msgstr "Périphériques"
+
+msgid "Playback"
+msgstr "Lecture"
+
+msgid "Recording"
+msgstr "Enregistrement"
+
+msgid "Settings"
+msgstr "Paramètres"
+
+#. Sidebar: the two system volume sliders (PC output / PC microphone).
+msgid "Volume"
+msgstr "Volume"
+
+msgid "Microphone"
+msgstr "Microphone"
+
+msgid "System volume control unavailable"
+msgstr "Contrôle du volume système indisponible"
+
+msgid "{label}: {percent}%"
+msgstr "{label} : {percent} %"

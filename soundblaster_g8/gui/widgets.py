@@ -97,6 +97,80 @@ def draw_icon(canvas: tk.Canvas, name: str, x0: float, y0: float, x1: float, y1:
                 cx + w * span / 18, cy + h * span / 18,
                 start=-55, extent=110, style=tk.ARC, outline=color, width=1.6,
             )
+    elif name == "device":
+        # Sound card outline with a jack socket, for the "Devices" menu entry.
+        canvas.create_rectangle(
+            x0 + w * 2 / 18, y0 + h * 4 / 18, x1 - w * 2 / 18, y1 - h * 4 / 18,
+            outline=color, width=1.6,
+        )
+        r = w * 2.5 / 18
+        canvas.create_oval(cx - r, cy - r, cx + r, cy + r, outline=color, width=1.6)
+    elif name == "playback":
+        canvas.create_polygon(
+            x0 + w * 5 / 18, y0 + h * 3 / 18,
+            x1 - w * 4 / 18, cy,
+            x0 + w * 5 / 18, y1 - h * 3 / 18,
+            fill=color, outline="",
+        )
+    elif name == "recording":
+        r = w * 7 / 18
+        canvas.create_oval(cx - r, cy - r, cx + r, cy + r, outline=color, width=1.6)
+        r2 = w * 3.5 / 18
+        canvas.create_oval(cx - r2, cy - r2, cx + r2, cy + r2, fill=color, outline="")
+    elif name == "settings":
+        # Simplified cog: a ring plus eight short radial teeth. Four longer
+        # teeth read as a crosshair rather than a gear at badge size.
+        r = w * 5.5 / 18
+        canvas.create_oval(cx - r, cy - r, cx + r, cy + r, outline=color, width=1.6)
+        tooth = w * 2.5 / 18
+        diagonal = 0.7071  # cos(45°), for the in-between teeth
+        for dx, dy in (
+            (0, -1), (0, 1), (-1, 0), (1, 0),
+            (-diagonal, -diagonal), (diagonal, -diagonal),
+            (-diagonal, diagonal), (diagonal, diagonal),
+        ):
+            canvas.create_line(
+                cx + dx * (r - 1), cy + dy * (r - 1),
+                cx + dx * (r + tooth), cy + dy * (r + tooth),
+                fill=color, width=1.6, capstyle=tk.ROUND,
+            )
+    elif name == "speaker":
+        # Same cone as "decoder", at the smaller scale used by the volume rows.
+        canvas.create_polygon(
+            x0 + w * 3 / 18, y0 + h * 7 / 18,
+            x0 + w * 6 / 18, y0 + h * 7 / 18,
+            x0 + w * 9 / 18, y0 + h * 3 / 18,
+            x0 + w * 9 / 18, y0 + h * 15 / 18,
+            x0 + w * 6 / 18, y0 + h * 11 / 18,
+            x0 + w * 3 / 18, y0 + h * 11 / 18,
+            fill=color, outline="",
+        )
+        for span in (5, 8):
+            canvas.create_arc(
+                cx - w * span / 18, cy - h * span / 18,
+                cx + w * span / 18, cy + h * span / 18,
+                start=-50, extent=100, style=tk.ARC, outline=color, width=1.6,
+            )
+    elif name == "microphone":
+        # Capsule, then the cradle arc *below* it, then the stand: at 18px the
+        # three parts need clear air between them or they merge into a blob.
+        cap_w = w * 2.5 / 18
+        draw_rounded_rect(
+            canvas, cx - cap_w, y0 + h * 2 / 18, cx + cap_w, y0 + h * 9.5 / 18,
+            cap_w, fill=color, outline="",
+        )
+        arc_r = w * 5 / 18
+        arc_cy = y0 + h * 8 / 18
+        canvas.create_arc(
+            cx - arc_r, arc_cy - arc_r, cx + arc_r, arc_cy + arc_r,
+            start=200, extent=140, style=tk.ARC, outline=color, width=1.6,
+        )
+        base_y = y0 + h * 15.5 / 18
+        canvas.create_line(cx, y0 + h * 13 / 18, cx, base_y, fill=color, width=1.6)
+        canvas.create_line(
+            cx - w * 3 / 18, base_y, cx + w * 3 / 18, base_y,
+            fill=color, width=1.6, capstyle=tk.ROUND,
+        )
     elif name == "reset":
         canvas.create_arc(
             x0 + w * 0.08, y0 + h * 0.08, x1 - w * 0.22, y1 - h * 0.08,
@@ -239,12 +313,18 @@ class Slider(tk.Canvas):
         self._step = step
         self._on_change = on_change
         self._on_release = on_release
+        self._enabled = True
 
         self.bind("<Configure>", self._on_configure)
         self.bind("<Button-1>", self._on_drag)
         self.bind("<B1-Motion>", self._on_drag)
         self.bind("<ButtonRelease-1>", self._on_release_evt)
         self._variable.trace_add("write", lambda *_args: self._redraw())
+        self._redraw()
+
+    def set_enabled(self, enabled: bool) -> None:
+        """Enables/disables dragging (a disabled slider is drawn greyed out)."""
+        self._enabled = enabled
         self._redraw()
 
     def _on_configure(self, event: tk.Event) -> None:
@@ -269,6 +349,8 @@ class Slider(tk.Canvas):
         return min(self._to, max(self._from, stepped))
 
     def _on_drag(self, event: tk.Event) -> None:
+        if not self._enabled:
+            return
         value = self._pos_to_value(event.y if self._vertical else event.x)
         if value != self._variable.get():
             self._variable.set(value)
@@ -276,7 +358,7 @@ class Slider(tk.Canvas):
                 self._on_change(value)
 
     def _on_release_evt(self, _event=None) -> None:
-        if self._on_release is not None:
+        if self._enabled and self._on_release is not None:
             self._on_release()
 
     def _redraw(self) -> None:
@@ -284,23 +366,25 @@ class Slider(tk.Canvas):
         c = self.THICKNESS / 2
         pos = self._value_to_pos(self._variable.get())
         track_end = max(self._length - self.THUMB_R, self.THUMB_R)
+        track = theme.SLIDER_TRACK if self._enabled else theme.BG_TRACK_DISABLED
+        thumb = theme.FG_THUMB if self._enabled else theme.FG_THUMB_DISABLED
         if self._vertical:
             self.create_line(
                 c, self.THUMB_R, c, track_end,
-                fill=theme.SLIDER_TRACK, width=self.TRACK_H, capstyle=tk.ROUND,
+                fill=track, width=self.TRACK_H, capstyle=tk.ROUND,
             )
             self.create_oval(
                 c - self.THUMB_R, pos - self.THUMB_R, c + self.THUMB_R, pos + self.THUMB_R,
-                fill=theme.FG_THUMB, outline="#1a1a1c",
+                fill=thumb, outline="#1a1a1c",
             )
         else:
             self.create_line(
                 self.THUMB_R, c, track_end, c,
-                fill=theme.SLIDER_TRACK, width=self.TRACK_H, capstyle=tk.ROUND,
+                fill=track, width=self.TRACK_H, capstyle=tk.ROUND,
             )
             self.create_oval(
                 pos - self.THUMB_R, c - self.THUMB_R, pos + self.THUMB_R, c + self.THUMB_R,
-                fill=theme.FG_THUMB, outline="#1a1a1c",
+                fill=thumb, outline="#1a1a1c",
             )
 
 
@@ -686,3 +770,202 @@ class SplitSelect(tk.Canvas):
             cx - 4, cy - 2, cx, cy + 2, cx + 4, cy - 2,
             fill="white", width=2, joinstyle=tk.ROUND, capstyle=tk.ROUND,
         )
+
+
+class SidebarItem(tk.Canvas):
+    """Sidebar menu row: icon on the left, label, full-width highlight.
+
+    Four visual states, drawn rather than themed (like every other widget
+    here): normal, hovered, selected (accent fill) and disabled - the last one
+    for the menu entries whose page isn't implemented yet, which ignore clicks
+    and keep the arrow cursor.
+    """
+
+    HEIGHT = 40
+    ICON_SIZE = 18
+    PADX = 8      # gap between the highlight and the sidebar edges
+    ICON_GAP = 12
+
+    def __init__(
+        self,
+        parent: tk.Misc,
+        icon: str,
+        text: str,
+        command: Optional[Callable[[], None]] = None,
+        bg: str = theme.BG_CARD,
+        width: int = 200,
+        font=theme.FONT_BODY,
+    ):
+        super().__init__(
+            parent, width=width, height=self.HEIGHT,
+            highlightthickness=0, bg=bg, bd=0, cursor="hand2",
+        )
+        self._icon = icon
+        self._text = text
+        self._command = command
+        self._font = font
+        self._width = width
+        self._enabled = True
+        self._selected = False
+        self._hover = False
+
+        self.bind("<Configure>", self._on_configure)
+        self.bind("<Button-1>", self._on_click)
+        self.bind("<Enter>", self._on_enter)
+        self.bind("<Leave>", self._on_leave)
+        self._redraw()
+
+    def _on_configure(self, event: tk.Event) -> None:
+        self._width = event.width
+        self._redraw()
+
+    def _on_click(self, _event=None) -> None:
+        if self._enabled and self._command is not None:
+            self._command()
+
+    def _on_enter(self, _event=None) -> None:
+        self._hover = True
+        self._redraw()
+
+    def _on_leave(self, _event=None) -> None:
+        self._hover = False
+        self._redraw()
+
+    def set_selected(self, selected: bool) -> None:
+        self._selected = selected
+        self._redraw()
+
+    def set_enabled(self, enabled: bool) -> None:
+        self._enabled = enabled
+        self.config(cursor="hand2" if enabled else "arrow")
+        self._redraw()
+
+    def set_text(self, text: str) -> None:
+        self._text = text
+        self._redraw()
+
+    def _redraw(self) -> None:
+        self.delete("all")
+        if self._selected:
+            fill, fg = theme.ACCENT, theme.FG_PRIMARY
+        elif not self._enabled:
+            fill, fg = None, theme.FG_THUMB_DISABLED
+        elif self._hover:
+            fill, fg = theme.BORDER_CARD, theme.FG_PRIMARY
+        else:
+            fill, fg = None, theme.FG_LABEL
+
+        if fill is not None:
+            draw_rounded_rect(
+                self, self.PADX, 3, self._width - self.PADX, self.HEIGHT - 3, 6,
+                fill=fill, outline="",
+            )
+
+        icon_x = self.PADX + 12
+        icon_y = (self.HEIGHT - self.ICON_SIZE) / 2
+        draw_icon(
+            self, self._icon, icon_x, icon_y,
+            icon_x + self.ICON_SIZE, icon_y + self.ICON_SIZE, color=fg,
+        )
+        self.create_text(
+            icon_x + self.ICON_SIZE + self.ICON_GAP, self.HEIGHT / 2,
+            text=self._text, fill=fg, font=self._font, anchor="w",
+        )
+
+
+class VolumeSlider(tk.Frame):
+    """Icon + horizontal slider + percentage, as used at the sidebar's foot.
+
+    Wraps the shared :class:`Slider`: the percentage label follows the thumb
+    while dragging (``on_change``) and the value is only pushed out on release
+    (``on_release``), so a drag across the track triggers one write, not fifty.
+    ``set_value`` is the other direction - a volume change made outside the
+    application - and deliberately doesn't call back.
+    """
+
+    ICON_SIZE = 18
+    PERCENT_CHARS = 4  # widest label, "100%": keeps the row from jittering
+
+    def __init__(
+        self,
+        parent: tk.Misc,
+        icon: str,
+        command: Optional[Callable[[int], None]] = None,
+        bg: str = theme.BG_CARD,
+        font=theme.FONT_SMALL,
+    ):
+        super().__init__(parent, bg=bg)
+        self._command = command
+        self._dragging = False
+        #: False until a real volume has been read: the percentage then shows
+        #: "--" rather than a meaningless 0%.
+        self._value_known = False
+        self._variable = tk.DoubleVar(value=0.0)
+
+        icon_canvas = tk.Canvas(
+            self, width=self.ICON_SIZE, height=self.ICON_SIZE,
+            highlightthickness=0, bg=bg, bd=0,
+        )
+        icon_canvas.pack(side=tk.LEFT)
+        self._icon_canvas = icon_canvas
+        self._icon = icon
+
+        self._percent_label = tk.Label(
+            self, text="", bg=bg, fg=theme.FG_LABEL, font=font,
+            width=self.PERCENT_CHARS, anchor="e",
+        )
+        self._percent_label.pack(side=tk.RIGHT, padx=(8, 0))
+
+        self._slider = Slider(
+            self, variable=self._variable, from_=0, to=100, step=1,
+            on_change=self._on_drag_change, on_release=self._on_drag_release,
+            bg=bg, width=100, orientation="horizontal",
+        )
+        self._slider.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(10, 0))
+
+        self._enabled = True
+        self._redraw_icon()
+        self._render_percent()
+
+    def _redraw_icon(self) -> None:
+        self._icon_canvas.delete("all")
+        color = ICON_COLOR if self._enabled else theme.FG_THUMB_DISABLED
+        draw_icon(self._icon_canvas, self._icon, 0, 0, self.ICON_SIZE, self.ICON_SIZE, color=color)
+
+    def _render_percent(self) -> None:
+        text = f"{int(round(self._variable.get()))}%" if self._value_known else "--"
+        self._percent_label.config(text=text)
+
+    def _on_drag_change(self, _value: float) -> None:
+        self._dragging = True
+        self._value_known = True
+        self._render_percent()
+
+    def _on_drag_release(self) -> None:
+        self._dragging = False
+        if self._command is not None:
+            self._command(int(round(self._variable.get())))
+
+    def is_dragging(self) -> bool:
+        """Whether the user currently holds the thumb (external updates skipped)."""
+        return self._dragging
+
+    def get_value(self) -> int:
+        return int(round(self._variable.get()))
+
+    def set_value(self, percent: Optional[int]) -> None:
+        """Moves the thumb without firing ``command`` (external change).
+
+        ``None`` means "no readable volume" (no sound server, or a device with
+        no software volume control): the thumb goes to 0 and the percentage
+        shows "--".
+        """
+        self._value_known = percent is not None
+        self._variable.set(0 if percent is None else max(0, min(100, int(percent))))
+        self._render_percent()
+
+    def set_enabled(self, enabled: bool) -> None:
+        self._enabled = enabled
+        self._slider.set_enabled(enabled)
+        self._percent_label.config(fg=theme.FG_LABEL if enabled else theme.FG_THUMB_DISABLED)
+        self._redraw_icon()

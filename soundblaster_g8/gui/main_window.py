@@ -13,20 +13,32 @@ result is brought back to the GUI thread via ``self.after(0, ...)``.
 The window holds four "pages" (main page / Equalizer page / CrystalVoice
 page / Decoder page) in the same container, only one packed at a time (no
 floating window): see ``_show_main_page``/``_show_eq_page``/``_show_cv_page``/
-``_show_decoder_page``.
+``_show_decoder_page``. They live in the right-hand column, next to the
+full-height navigation sidebar (``sidebar.py``); the Equalizer, CrystalVoice
+and Decoder pages stay sub-pages of "Devices", reached by clicking a row and
+left with the Back button, so "Devices" remains the selected menu entry
+throughout.
+
+The sidebar's two volume sliders drive the *system* volume (see
+``system_volume.py``), not the card's own registers: they go through the same
+worker thread as hardware commands, because they shell out to ``pactl`` /
+``osascript``.
 """
 
 import tkinter as tk
 from pathlib import Path
 from typing import Callable, Optional
 
+from .. import alsa_fix, system_volume
 from ..controller import SoundBlasterController
+from ..driver import PRODUCT_ID, VENDOR_ID
 from . import i18n, theme, widgets
 from .crystalvoice_panel import CrystalVoicePanel
 from .decoder_panel import DecoderPanel
 from .eq_panel import EQPanel
+from .sidebar import SIDEBAR_WIDTH, Sidebar
 
-MIN_WINDOW_WIDTH = 640
+MIN_WINDOW_WIDTH = 640 + SIDEBAR_WIDTH
 ASSETS_DIR = Path(__file__).parent / "assets"
 
 #: (feature key, icon glyph, title msgid, subtitle msgid) for the two
@@ -91,19 +103,40 @@ class MainWindow(tk.Tk):
         # be re-rendered in place when the language changes.
         self._last_status: tuple[str, dict] = ("Ready", {})
 
+        # System volume (sidebar sliders): handle of the background watcher,
+        # kept so it can be stopped when the window closes; id of the pending
+        # "re-enable the sliders" job scheduled after a Direct Mode
+        # re-enumeration (see _on_reconnecting); and which of the two volumes
+        # the platform actually lets us read, so a slider is never re-enabled
+        # for a device that has no volume control.
+        self._volume_watcher = None
+        self._volume_reenable_job: Optional[str] = None
+        self._volume_readable = {system_volume.OUTPUT: False, system_volume.INPUT: False}
+
         # Window setup
         self._setup_ui()
 
     def _setup_ui(self):
-        """Sets up the UI: header, pages, status bar."""
+        """Sets up the UI: sidebar, header, pages, status bar."""
         theme.apply_theme(self)
+
+        # Sidebar first: it packs itself on the left, and the content column
+        # then takes whatever is left.
+        self._sidebar = Sidebar(
+            self,
+            on_select=self._on_sidebar_select,
+            on_output_volume=self._on_output_volume_change,
+            on_input_volume=self._on_input_volume_change,
+        )
+        self._content = tk.Frame(self, bg=theme.BG_WINDOW)
+        self._content.pack(side=tk.LEFT, expand=True, fill=tk.BOTH)
 
         self._setup_header()
         i18n.add_listener(self._retranslate)
 
         # Pages container: main_page and eq_page are siblings, only one is
         # packed at a time (see _show_main_page/_show_eq_page).
-        self._pages_container = tk.Frame(self, bg=theme.BG_WINDOW)
+        self._pages_container = tk.Frame(self._content, bg=theme.BG_WINDOW)
         self._pages_container.pack(expand=True, fill=tk.BOTH)
 
         self._main_page = tk.Frame(self._pages_container, bg=theme.BG_WINDOW)
@@ -120,7 +153,7 @@ class MainWindow(tk.Tk):
         self._decoder_panel: Optional[DecoderPanel] = None
 
         # Status bar (shared between both pages)
-        status_bar = tk.Frame(self, bg=theme.BG_WINDOW)
+        status_bar = tk.Frame(self._content, bg=theme.BG_WINDOW)
         status_bar.pack(fill=tk.X, side=tk.BOTTOM)
 
         self._status_label = tk.Label(
@@ -136,19 +169,20 @@ class MainWindow(tk.Tk):
         self._status_label.pack(expand=True, fill=tk.X)
         self._render_status()
 
-        divider = tk.Frame(self, bg=theme.BORDER_CARD, height=1)
+        divider = tk.Frame(self._content, bg=theme.BORDER_CARD, height=1)
         divider.pack(fill=tk.X, side=tk.BOTTOM)
 
         self._show_main_page()
 
         # Controller initialization
         self._init_controller()
+        self._init_system_volume()
 
         self._fit_window_to_page()
 
     def _setup_header(self):
         """Shared header: back button (hidden on the main page) + title + language selector."""
-        header = tk.Frame(self, bg=theme.BG_WINDOW, height=64)
+        header = tk.Frame(self._content, bg=theme.BG_WINDOW, height=64)
         header.pack(fill=tk.X)
         header.pack_propagate(False)
 
@@ -386,6 +420,148 @@ class MainWindow(tk.Tk):
         )
         self._set_row_cursor(self._decoder_row, "hand2" if enabled else "arrow")
 
+    # ------------------------------------------------------------------
+    # Sidebar navigation and system volume
+    # ------------------------------------------------------------------
+
+    def _on_sidebar_select(self, key: str) -> None:
+        """Handles a click on an enabled sidebar entry.
+
+        Only "Devices" exists so far; the other three are built disabled and
+        never reach this method.
+        """
+        if key == "devices":
+            self._show_main_page()
+
+    def _init_system_volume(self) -> None:
+        """Fills the sidebar sliders and starts watching for outside changes."""
+        if not system_volume.available():
+            self._sidebar.set_output_enabled(False)
+            self._sidebar.set_input_enabled(False)
+            self._sidebar.set_output_volume(None)
+            self._sidebar.set_input_volume(None)
+            self._set_status("System volume control unavailable")
+            return
+
+        self._refresh_volumes()
+        # The callback fires on the watcher's thread: hop back to Tk's.
+        self._volume_watcher = system_volume.start_watch(
+            lambda: self.after(0, self._refresh_volumes)
+        )
+        self.bind("<Destroy>", self._on_destroy, add="+")
+
+    def _on_destroy(self, event=None) -> None:
+        """Stops the volume watcher when the window itself goes away.
+
+        ``<Destroy>`` also fires for every child widget, hence the identity
+        check on the event's widget.
+        """
+        if event is not None and event.widget is not self:
+            return
+        system_volume.stop_watch(self._volume_watcher)
+        self._volume_watcher = None
+
+    def _refresh_volumes(self) -> None:
+        """Re-reads both system volumes and pushes them to the sidebar.
+
+        The reads are two subprocess calls, so they go to the shared worker
+        like every other blocking operation; only the display update runs on
+        the Tk thread. Called at startup, after a write, and on every change
+        the watcher reports - which can be several a second while another
+        application starts a stream.
+        """
+        def worker():
+            readings = {
+                kind: system_volume.get_volume(kind)
+                for kind in (system_volume.OUTPUT, system_volume.INPUT)
+            }
+            self.after(0, lambda: self._show_volumes(readings))
+
+        if self._controller is None:
+            self._show_volumes({
+                kind: system_volume.get_volume(kind)
+                for kind in (system_volume.OUTPUT, system_volume.INPUT)
+            })
+        else:
+            self._controller.submit(worker)
+
+    def _show_volumes(self, readings: dict[str, Optional[tuple[int, bool]]]) -> None:
+        """Applies volume readings to the sidebar (Tk thread).
+
+        A slider the user is currently dragging keeps its position (the sidebar
+        filters that out), and a volume that can't be read - typically a
+        microphone with no software gain control on macOS - disables its
+        slider.
+        """
+        for kind, show, enable in (
+            (system_volume.OUTPUT, self._sidebar.set_output_volume, self._sidebar.set_output_enabled),
+            (system_volume.INPUT, self._sidebar.set_input_volume, self._sidebar.set_input_enabled),
+        ):
+            reading = readings.get(kind)
+            self._volume_readable[kind] = reading is not None
+            show(None if reading is None else reading[0])
+            if reading is None:
+                enable(False)
+
+    def _on_output_volume_change(self, percent: int) -> None:
+        """Handles a release of the PC output slider."""
+        self._apply_volume(system_volume.OUTPUT, percent, i18n._("Volume"))
+
+    def _on_input_volume_change(self, percent: int) -> None:
+        """Handles a release of the PC microphone slider."""
+        self._apply_volume(system_volume.INPUT, percent, i18n._("Microphone"))
+
+    def _apply_volume(self, kind: str, percent: int, label: str) -> None:
+        """Writes a system volume on the shared worker thread.
+
+        ``pactl``/``osascript`` are subprocesses: running them in the Tk
+        callback would stutter the slider. The controller's worker already
+        serializes one job at a time, which is exactly the ordering we want
+        when several releases pile up.
+
+        When the target device is the G8 itself, the write goes to the card's
+        ALSA mixer, which knocks it out of Direct Mode if it is still settling
+        after a re-enumeration (see ``alsa_fix.SETTLE_DELAY_S``). In that
+        window the write is postponed rather than dropped: the user's move
+        still lands, just a few seconds later.
+        """
+        if self._controller is None:
+            return
+
+        def worker():
+            wait = self._settle_delay_before_write(kind)
+            if wait > 0:
+                self.after(int(wait * 1000), lambda: self._apply_volume(kind, percent, label))
+                return
+            ok = system_volume.set_volume(kind, percent)
+            self.after(0, lambda: self._finish_volume_change(label, percent, ok))
+
+        self._controller.submit(worker)
+
+    def _settle_delay_before_write(self, kind: str) -> float:
+        """Seconds to wait before writing ``kind``'s volume, 0 if it can go now."""
+        if not system_volume.default_device_is_g8(kind):
+            return 0.0
+        age = alsa_fix.seconds_since_enumeration(VENDOR_ID, PRODUCT_ID)
+        if age is None or age >= alsa_fix.SETTLE_DELAY_S:
+            return 0.0
+        # + 0.1 s of margin: coming back exactly on the threshold would race
+        # the very condition we're avoiding.
+        return alsa_fix.SETTLE_DELAY_S - age + 0.1
+
+    def _finish_volume_change(self, label: str, percent: int, ok: bool) -> None:
+        if ok:
+            self._set_status("{label}: {percent}%", label=label, percent=percent)
+        else:
+            self._set_status("{label}: command failed (see console)", label=label)
+        # Show what the system actually applied (it may clamp or round).
+        self._refresh_volumes()
+
+    def _set_volume_sliders_enabled(self, enabled: bool) -> None:
+        """Enables/disables both sliders, never re-enabling an unreadable one."""
+        self._sidebar.set_output_enabled(enabled and self._volume_readable[system_volume.OUTPUT])
+        self._sidebar.set_input_enabled(enabled and self._volume_readable[system_volume.INPUT])
+
     def _on_language_change(self, index: int) -> None:
         """Handles a language-selector change; persists and re-renders everything in place."""
         if 0 <= index < len(self._lang_codes):
@@ -395,6 +571,7 @@ class MainWindow(tk.Tk):
         """Registered as an i18n listener: re-applies every static text in place."""
         self.title(i18n._("Sound Blaster G8 - Control"))
         self._back_button.set_text(i18n._("←  Back"))
+        self._sidebar.retranslate()
 
         title_msgid, title_font = self._current_title
         self._title_label.config(text=i18n._(title_msgid), font=title_font)
@@ -571,6 +748,10 @@ class MainWindow(tk.Tk):
             if other is not page:
                 other.pack_forget()
 
+        # Every page is reached from "Devices" (the other menu entries have no
+        # page yet), so it stays the selected one throughout.
+        self._sidebar.select("devices")
+
         if page is self._main_page:
             self._back_button.place_forget()
         else:
@@ -692,11 +873,34 @@ class MainWindow(tk.Tk):
     # ------------------------------------------------------------------
 
     def _on_reconnecting(self, active: bool) -> None:
-        """Relays the controller's ``reconnecting`` event (worker thread)."""
+        """Relays the controller's ``reconnecting`` event (worker thread).
+
+        Also locks the volume sliders for the duration: while the card
+        re-enumerates, and for ``alsa_fix.SETTLE_DELAY_S`` afterwards, a mixer
+        write would drop it out of Direct Mode.
+        """
         if active:
             self.after(0, lambda: self._set_status("Direct Mode: reconnecting the device…"))
+            self.after(0, self._lock_volume_sliders)
         else:
             self.after(0, lambda: self._set_status("Device reconnected"))
+            self.after(0, self._unlock_volume_sliders_after_settle)
+
+    def _lock_volume_sliders(self) -> None:
+        if self._volume_reenable_job is not None:
+            self.after_cancel(self._volume_reenable_job)
+            self._volume_reenable_job = None
+        self._set_volume_sliders_enabled(False)
+
+    def _unlock_volume_sliders_after_settle(self) -> None:
+        def unlock():
+            self._volume_reenable_job = None
+            self._set_volume_sliders_enabled(True)
+            self._refresh_volumes()
+
+        if self._volume_reenable_job is not None:
+            self.after_cancel(self._volume_reenable_job)
+        self._volume_reenable_job = self.after(int(alsa_fix.SETTLE_DELAY_S * 1000), unlock)
 
     def _handle_toggle(
         self,
