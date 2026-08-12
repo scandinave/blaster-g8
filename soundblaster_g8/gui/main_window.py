@@ -4,10 +4,11 @@ Dark-themed Tkinter interface (see ``theme.py``/``widgets.py``), matching the
 "Sound Blaster G8.dc.html" design mockup (product photo, icon badges, "split
 button" style sound-mode selector).
 
-Hardware commands run in a worker thread: toggling Direct Mode triggers a USB
-reset on the card and takes 2 to 4 seconds, which would freeze the window if
-done in the Tk callback. The result is brought back to the GUI thread via
-``self.after(0, ...)``.
+Hardware commands run off the Tk thread, on the controller's shared worker
+(``controller.submit``): toggling Direct Mode triggers a USB reset on the card
+and takes 2 to 4 seconds, which would freeze the window if done in the Tk
+callback. Commands are executed one at a time, in submission order, and the
+result is brought back to the GUI thread via ``self.after(0, ...)``.
 
 The window holds four "pages" (main page / Equalizer page / CrystalVoice
 page / Decoder page) in the same container, only one packed at a time (no
@@ -15,7 +16,6 @@ floating window): see ``_show_main_page``/``_show_eq_page``/``_show_cv_page``/
 ``_show_decoder_page``.
 """
 
-import threading
 import tkinter as tk
 from pathlib import Path
 from typing import Callable, Optional
@@ -42,13 +42,25 @@ class MainWindow(tk.Tk):
 
     def __init__(self):
         """Initializes the main window."""
-        super().__init__(baseName="blaster-g8", className="blaster-g8")
+        # Sets WM_CLASS to ("soundblaster-g8", "Soundblaster-g8"). The
+        # instance field has to stay equal to StartupWMClass in
+        # packaging/soundblaster-g8.desktop - that is how the desktop shell
+        # ties the window to its .desktop entry, and hence to the name and
+        # icon it shows in the taskbar. When the two drifted apart, COSMIC
+        # fell back to the process name and displayed "python3.12" with no
+        # icon.
+        super().__init__(baseName="soundblaster-g8", className="soundblaster-g8")
 
         i18n.load_saved_language()
 
         self.title(i18n._("Sound Blaster G8 - Control"))
         self.resizable(True, True)
-        self._app_icon_image = tk.PhotoImage(file=str(ASSETS_DIR / "icon.png"))
+        # 128x128 rather than the full-size icon.png: Tk keeps the image
+        # uncompressed (32 bits/pixel) and pushes a second copy to the X
+        # server, so the 512x512 version costs 3 MB of RSS against 0.2 MB
+        # here - for an icon no window manager displays above 128px. The
+        # 512x512 file stays on disk for the hicolor theme (debian/rules).
+        self._app_icon_image = tk.PhotoImage(file=str(ASSETS_DIR / "icon-128.png"))
         self.iconphoto(True, self._app_icon_image)
 
         # Controller singleton
@@ -101,7 +113,8 @@ class MainWindow(tk.Tk):
         self._pages = (self._main_page, self._eq_page, self._cv_page, self._decoder_page)
 
         self._setup_main_page(self._main_page)
-        # The panels need the controller: built in _init_controller.
+        # The panels need the controller and are only built when their page
+        # is first opened (see _ensure_eq_panel & co.).
         self._eq_panel: Optional[EQPanel] = None
         self._cv_panel: Optional[CrystalVoicePanel] = None
         self._decoder_panel: Optional[DecoderPanel] = None
@@ -450,23 +463,9 @@ class MainWindow(tk.Tk):
         self._update_eq_button_label()
         self._update_decoder_row_label()
 
-        self._eq_panel = EQPanel(
-            self._eq_page, self._controller,
-            status_callback=self._set_status,
-        )
-        self._eq_panel.pack(fill=tk.BOTH, expand=True)
-
-        self._cv_panel = CrystalVoicePanel(
-            self._cv_page, self._controller,
-            status_callback=self._set_status,
-        )
-        self._cv_panel.pack(fill=tk.BOTH, expand=True)
-
-        self._decoder_panel = DecoderPanel(
-            self._decoder_page, self._controller,
-            status_callback=self._set_status,
-        )
-        self._decoder_panel.pack(fill=tk.BOTH, expand=True)
+        # The three secondary panels are built on first navigation (see
+        # _ensure_eq_panel & co.), not here: they cost ~1.5 MB of widgets
+        # for pages most launches never open.
 
         if self._controller.connect():
             info = self._controller.get_debug_info()
@@ -589,19 +588,54 @@ class MainWindow(tk.Tk):
         self._update_decoder_row_label()
         self._show_page(self._main_page, "Sound Blaster G8", theme.FONT_TITLE)
 
+    # Panels are built on first navigation rather than at startup: they
+    # account for ~1.5 MB of widgets, and most launches only ever use the
+    # main page. Each builder must run *before* _show_page, which sizes the
+    # window from the displayed page's requested geometry.
+
+    def _ensure_eq_panel(self):
+        """Builds the Equalizer panel on first use."""
+        if self._eq_panel is None and self._controller is not None:
+            self._eq_panel = EQPanel(
+                self._eq_page, self._controller,
+                status_callback=self._set_status,
+            )
+            self._eq_panel.pack(fill=tk.BOTH, expand=True)
+
+    def _ensure_cv_panel(self):
+        """Builds the CrystalVoice panel on first use."""
+        if self._cv_panel is None and self._controller is not None:
+            self._cv_panel = CrystalVoicePanel(
+                self._cv_page, self._controller,
+                status_callback=self._set_status,
+            )
+            self._cv_panel.pack(fill=tk.BOTH, expand=True)
+
+    def _ensure_decoder_panel(self):
+        """Builds the Decoder panel on first use."""
+        if self._decoder_panel is None and self._controller is not None:
+            self._decoder_panel = DecoderPanel(
+                self._decoder_page, self._controller,
+                status_callback=self._set_status,
+            )
+            self._decoder_panel.pack(fill=tk.BOTH, expand=True)
+
     def _show_eq_page(self):
         """Shows the Equalizer page (with a back button at the top left)."""
+        self._ensure_eq_panel()
         self._show_page(self._eq_page, "Equalizer", theme.FONT_TITLE_EQ)
         self._prepare_eq_page_async()
 
     def _show_cv_page(self):
         """Shows the CrystalVoice page (with a back button at the top left)."""
+        self._ensure_cv_panel()
         self._show_page(self._cv_page, "CrystalVoice", theme.FONT_TITLE_EQ)
         if self._cv_panel is not None:
             self._cv_panel.refresh()
 
     def _show_decoder_page(self):
         """Shows the Decoder page (with a back button at the top left)."""
+        self._ensure_decoder_panel()
         self._show_page(self._decoder_page, "Decoder", theme.FONT_TITLE_EQ)
         if self._decoder_panel is not None:
             self._decoder_panel.refresh()
@@ -632,7 +666,7 @@ class MainWindow(tk.Tk):
                         self._eq_panel.refresh()
                 self.after(0, on_success)
 
-        threading.Thread(target=worker, name="g8-eq-enable", daemon=True).start()
+        self._controller.submit(worker)
 
     def _fit_window_to_page(self):
         """Resizes the window so the displayed page fits entirely."""
@@ -703,7 +737,7 @@ class MainWindow(tk.Tk):
                 name, label, var, requested, ok, state, error
             ))
 
-        threading.Thread(target=worker, name=f"g8-{name}", daemon=True).start()
+        self._controller.submit(worker)
 
     def _finish_toggle(
         self,
@@ -770,7 +804,7 @@ class MainWindow(tk.Tk):
                 error = exc
             self.after(0, lambda: self._finish_sound_mode_change(slug, label, ok, error))
 
-        threading.Thread(target=worker, name="g8-sound_mode", daemon=True).start()
+        self._controller.submit(worker)
 
     def _finish_sound_mode_change(
         self,

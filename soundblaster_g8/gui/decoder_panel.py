@@ -14,7 +14,6 @@ Sound Mode): the selected button reflects the last command it acknowledged,
 so a refused write leaves the previous choice selected.
 """
 
-import threading
 import tkinter as tk
 from typing import Callable, Optional
 
@@ -168,7 +167,7 @@ class DecoderPanel(tk.Frame):
                 error = exc
             self.after(0, lambda: self._finish_mode_change(label, mode, ok, error))
 
-        threading.Thread(target=worker, name=f"g8-decoder-{slug}", daemon=True).start()
+        self.controller.submit(worker)
 
     def _finish_mode_change(
         self, label: str, mode: str, ok: bool, error: Optional[Exception],

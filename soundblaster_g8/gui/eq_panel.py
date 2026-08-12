@@ -15,7 +15,6 @@ Cards and sliders follow the design mockup's style (dark background, thin
 track + round thumb): see ``theme.py``/``widgets.py``.
 """
 
-import threading
 import tkinter as tk
 from typing import Callable, Optional
 
@@ -332,7 +331,7 @@ class EQPanel(tk.Frame):
                 error = exc
             self.after(0, lambda: self._finish_tilt(label, value, ok, error))
 
-        threading.Thread(target=worker, name=f"g8-eq-tilt-{label}", daemon=True).start()
+        self.controller.submit(worker)
 
     def _finish_tilt(self, label: str, value: float, ok: bool, error: Optional[Exception]):
         self.refresh()
@@ -356,7 +355,7 @@ class EQPanel(tk.Frame):
                 error = exc
             self.after(0, lambda: self._finish_commit(label, value, ok, error))
 
-        threading.Thread(target=worker, name=f"g8-eq-{label}", daemon=True).start()
+        self.controller.submit(worker)
 
     def _finish_commit(self, label: str, value: float, ok: bool, error: Optional[Exception]):
         if error is not None:

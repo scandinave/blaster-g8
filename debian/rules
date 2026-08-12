@@ -14,3 +14,8 @@ override_dh_install:
 	dh_install
 	install -D -m 0644 soundblaster_g8/gui/assets/icon.png \
 		debian/soundblaster-g8/usr/share/icons/hicolor/512x512/apps/soundblaster-g8.png
+# hicolor declares 512x512/apps as MinSize=64, so a taskbar asking for 32px
+# only finds that icon through the closest-size fallback. The 128x128 entry
+# makes small-size lookups direct.
+	install -D -m 0644 soundblaster_g8/gui/assets/icon-128.png \
+		debian/soundblaster-g8/usr/share/icons/hicolor/128x128/apps/soundblaster-g8.png

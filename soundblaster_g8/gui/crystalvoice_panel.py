@@ -17,7 +17,6 @@ acknowledged by the card but inaudible - hence the selector being greyed out
 with its toggle.
 """
 
-import threading
 import tkinter as tk
 from typing import Callable, Optional
 
@@ -328,7 +327,7 @@ class CrystalVoicePanel(tk.Frame):
                 0, lambda: self._finish_toggle(label, switch, var, requested, ok, error, select)
             )
 
-        threading.Thread(target=worker, name=f"g8-cv-{label_msgid}", daemon=True).start()
+        self.controller.submit(worker)
 
     def _finish_toggle(
         self,
@@ -436,7 +435,7 @@ class CrystalVoicePanel(tk.Frame):
                 0, lambda: self._finish_preset_change(label, preset, select, slugs, getter, ok, error)
             )
 
-        threading.Thread(target=worker, name=f"g8-cv-preset-{slug}", daemon=True).start()
+        self.controller.submit(worker)
 
     def _finish_preset_change(
         self,
@@ -483,7 +482,7 @@ class CrystalVoicePanel(tk.Frame):
                 error = exc
             self.after(0, lambda: self._finish_level_commit(label, value, ok, error))
 
-        threading.Thread(target=worker, name="g8-cv-noise-level", daemon=True).start()
+        self.controller.submit(worker)
 
     def _finish_level_commit(self, label: str, value: float, ok: bool, error: Optional[Exception]):
         if error is not None:

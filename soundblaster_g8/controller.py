@@ -7,6 +7,8 @@ the command: the GUI can thus refuse to flip a switch when the card didn't
 respond.
 """
 
+import queue
+import threading
 from typing import Callable, Optional
 
 from . import alsa_fix, protocol
@@ -48,6 +50,56 @@ DEFAULT_DECODER_MODE = "normal"
 #: to be identical.
 BASS_TILT_WEIGHTS = (0.27061, 0.28224, 0.20667, 0.10533, 0.044, 0.012, 0.0, 0.0, 0.0, 0.0)
 TREBLE_TILT_WEIGHTS = (0.0, 0.0, 0.0, 0.00773, 0.02591, 0.04182, 0.09182, 0.19955, 0.34167, 0.35637)
+
+
+class _HardwareWorker:
+    """Serial queue for hardware commands: one persistent daemon thread.
+
+    Every GUI action has to leave the Tk thread - a plain ``set_*`` takes a
+    few milliseconds, but a Direct Mode toggle blocks 2 to 4 seconds while
+    the card re-enumerates (see :meth:`driver.SoundBlasterG8Driver.reconnect`)
+    and would freeze the window.
+
+    Spawning a thread per click did that, at two costs: glibc reserves a
+    64 MB malloc arena plus an 8 MB stack per thread and never gives the
+    address space back, and two quick clicks raced for the driver's lock in
+    a non-deterministic order. A single worker fixes both - the driver
+    already serializes HID access internally, this just makes the ordering
+    explicit and predictable.
+
+    The thread starts on the first :meth:`submit` (so a controller that is
+    never driven, e.g. in a unit test, costs nothing) and is a daemon, so it
+    never holds up interpreter shutdown.
+    """
+
+    def __init__(self, name: str = "g8-hardware"):
+        self._queue: queue.SimpleQueue = queue.SimpleQueue()
+        self._thread: Optional[threading.Thread] = None
+        self._name = name
+        self._lock = threading.Lock()
+
+    def submit(self, job: Callable[[], None]) -> None:
+        """Queues ``job`` for execution on the worker thread."""
+        self._ensure_started()
+        self._queue.put(job)
+
+    def _ensure_started(self) -> None:
+        with self._lock:
+            if self._thread is None:
+                self._thread = threading.Thread(
+                    target=self._run, name=self._name, daemon=True
+                )
+                self._thread.start()
+
+    def _run(self) -> None:
+        while True:
+            job = self._queue.get()
+            try:
+                job()
+            except Exception as exc:
+                # A raising job must not kill the worker: every later
+                # command would silently never run.
+                print(f"[SoundBlasterController] Error in hardware job: {exc}")
 
 
 class SoundBlasterController:
@@ -116,6 +168,20 @@ class SoundBlasterController:
 
         # The driver signals reconnections: relay them as-is.
         self._driver.on_reconnecting = lambda active: self._notify("reconnecting", active)
+
+        self._worker = _HardwareWorker()
+
+    # ------------------------------------------------------------------
+    # Background execution
+    # ------------------------------------------------------------------
+
+    def submit(self, job: Callable[[], None]) -> None:
+        """Runs ``job`` off the Tk thread, serially with other commands.
+
+        Callers come back to the GUI thread themselves with
+        ``widget.after(0, ...)``. See :class:`_HardwareWorker`.
+        """
+        self._worker.submit(job)
 
     # ------------------------------------------------------------------
     # Connectivity

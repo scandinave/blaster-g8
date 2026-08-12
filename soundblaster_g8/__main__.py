@@ -3,13 +3,42 @@ Entry point for the Sound Blaster G8 Control application.
 Launches the Tkinter GUI.
 """
 
+import ctypes
 import sys
 from tkinter import ttk, messagebox
 import tkinter as tk
 
+#: ``mallopt`` option number for ``M_ARENA_MAX`` (see ``malloc.h``).
+_M_ARENA_MAX = -8
+
+
+def _cap_malloc_arenas() -> None:
+    """Makes every thread share glibc's main malloc arena.
+
+    Hardware commands run on a worker thread (see ``controller.submit``);
+    without this, glibc reserves a 64 MB arena per thread on top of its 8 MB
+    stack. That address space is virtual - it barely dents RSS - but it
+    inflates the VIRT column of every system monitor and is never handed
+    back. Together with the shared worker, this keeps VIRT flat around
+    70-80 MB where it used to climb past 200 MB with no ceiling.
+
+    The cost is that the worker and the Tk thread contend for one arena
+    lock. Irrelevant at this scale: the worker allocates a 65-byte frame per
+    command, and it spends its time blocked on USB, not in malloc.
+
+    Only affects arenas created afterwards, hence the call before any thread
+    starts.
+    """
+    try:
+        ctypes.CDLL("libc.so.6").mallopt(_M_ARENA_MAX, 1)
+    except (OSError, AttributeError):
+        pass  # not glibc (musl, macOS): nothing to cap
+
 
 def main():
     """Main function that launches the application."""
+    _cap_malloc_arenas()
+
     from soundblaster_g8.gui import MainWindow
     from soundblaster_g8.gui import i18n
 
