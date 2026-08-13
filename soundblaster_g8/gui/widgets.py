@@ -6,13 +6,17 @@ classes draw the design's shapes ("Sound Blaster G8.dc.html") on a
 ``tk.Canvas`` while keeping an API close to standard widgets
 (``tk.BooleanVar``/``tk.DoubleVar``, ``command`` callbacks) so they drop in
 without changing the calling pages' business logic.
+
+Pictograms are Bootstrap Icons, drawn as images: every widget that shows one
+asks :func:`icons.get` for the glyph at its size, tinted to whatever colour its
+current state calls for, and stamps it with ``create_image``.
 """
 
 import tkinter as tk
 import tkinter.font as tkfont
 from typing import Callable, Optional, Sequence
 
-from . import theme
+from . import icons, theme
 
 ICON_COLOR = "#cfcfd2"
 BADGE_BG = "#3d3d43"
@@ -42,149 +46,11 @@ def draw_rounded_rect(canvas: tk.Canvas, x1: float, y1: float, x2: float, y2: fl
     )
 
 
-def draw_icon(canvas: tk.Canvas, name: str, x0: float, y0: float, x1: float, y1: float, color: str = ICON_COLOR) -> None:
-    """Draws a simple icon (geometric glyph) within the [x0,y0,x1,y1] area.
-
-    Canvas approximations of the mockup's SVG pictograms (basic
-    lines/shapes): good enough at 36x36 badge scale, with no external
-    dependency.
-    """
-    w = x1 - x0
-    h = y1 - y0
-    cx = (x0 + x1) / 2
-    cy = (y0 + y1) / 2
-
-    if name == "direct":
-        canvas.create_line(x0, cy, x1, cy, fill=color, width=2, capstyle=tk.ROUND)
-        r = w * 3 / 18
-        canvas.create_oval(cx - r, cy - r, cx + r, cy + r, outline=color, width=2)
-    elif name == "scout":
-        r = w * 7 / 18
-        canvas.create_oval(cx - r, cy - r, cx + r, cy + r, outline=color, width=1.6)
-        r2 = w * 2 / 18
-        canvas.create_oval(cx - r2, cy - r2, cx + r2, cy + r2, fill=color, outline="")
-    elif name == "voice":
-        head_r = w * 3 / 18
-        head_cy = y0 + h * 6 / 18
-        canvas.create_oval(cx - head_r, head_cy - head_r, cx + head_r, head_cy + head_r, fill=color, outline="")
-        canvas.create_line(cx, y0 + h * 9 / 18, cx, y0 + h * 14 / 18, fill=color, width=1.6, capstyle=tk.ROUND)
-        canvas.create_line(
-            x0 + w * 5 / 18, y0 + h * 14 / 18, x0 + w * 13 / 18, y0 + h * 14 / 18,
-            fill=color, width=1.6, capstyle=tk.ROUND,
-        )
-    elif name == "equalizer":
-        bars = (
-            (x0 + w * 1 / 16, y0 + h * 7 / 16, w * 3 / 16, h * 7 / 16),
-            (x0 + w * 6.5 / 16, y0 + h * 3 / 16, w * 3 / 16, h * 11 / 16),
-            (x0 + w * 12 / 16, y0 + h * 9 / 16, w * 3 / 16, h * 5 / 16),
-        )
-        for bx, by, bw, bh in bars:
-            canvas.create_rectangle(bx, by, bx + bw, by + bh, fill=color, outline="")
-    elif name == "decoder":
-        # Speaker cone + two radiating arcs (Dolby decoder / DRC).
-        canvas.create_polygon(
-            x0 + w * 2 / 18, y0 + h * 7 / 18,
-            x0 + w * 5 / 18, y0 + h * 7 / 18,
-            x0 + w * 8 / 18, y0 + h * 3 / 18,
-            x0 + w * 8 / 18, y0 + h * 15 / 18,
-            x0 + w * 5 / 18, y0 + h * 11 / 18,
-            x0 + w * 2 / 18, y0 + h * 11 / 18,
-            fill=color, outline="",
-        )
-        for span in (5, 8):
-            canvas.create_arc(
-                cx - w * span / 18, cy - h * span / 18,
-                cx + w * span / 18, cy + h * span / 18,
-                start=-55, extent=110, style=tk.ARC, outline=color, width=1.6,
-            )
-    elif name == "device":
-        # Sound card outline with a jack socket, for the "Devices" menu entry.
-        canvas.create_rectangle(
-            x0 + w * 2 / 18, y0 + h * 4 / 18, x1 - w * 2 / 18, y1 - h * 4 / 18,
-            outline=color, width=1.6,
-        )
-        r = w * 2.5 / 18
-        canvas.create_oval(cx - r, cy - r, cx + r, cy + r, outline=color, width=1.6)
-    elif name == "playback":
-        canvas.create_polygon(
-            x0 + w * 5 / 18, y0 + h * 3 / 18,
-            x1 - w * 4 / 18, cy,
-            x0 + w * 5 / 18, y1 - h * 3 / 18,
-            fill=color, outline="",
-        )
-    elif name == "recording":
-        r = w * 7 / 18
-        canvas.create_oval(cx - r, cy - r, cx + r, cy + r, outline=color, width=1.6)
-        r2 = w * 3.5 / 18
-        canvas.create_oval(cx - r2, cy - r2, cx + r2, cy + r2, fill=color, outline="")
-    elif name == "settings":
-        # Simplified cog: a ring plus eight short radial teeth. Four longer
-        # teeth read as a crosshair rather than a gear at badge size.
-        r = w * 5.5 / 18
-        canvas.create_oval(cx - r, cy - r, cx + r, cy + r, outline=color, width=1.6)
-        tooth = w * 2.5 / 18
-        diagonal = 0.7071  # cos(45°), for the in-between teeth
-        for dx, dy in (
-            (0, -1), (0, 1), (-1, 0), (1, 0),
-            (-diagonal, -diagonal), (diagonal, -diagonal),
-            (-diagonal, diagonal), (diagonal, diagonal),
-        ):
-            canvas.create_line(
-                cx + dx * (r - 1), cy + dy * (r - 1),
-                cx + dx * (r + tooth), cy + dy * (r + tooth),
-                fill=color, width=1.6, capstyle=tk.ROUND,
-            )
-    elif name == "speaker":
-        # Same cone as "decoder", at the smaller scale used by the volume rows.
-        canvas.create_polygon(
-            x0 + w * 3 / 18, y0 + h * 7 / 18,
-            x0 + w * 6 / 18, y0 + h * 7 / 18,
-            x0 + w * 9 / 18, y0 + h * 3 / 18,
-            x0 + w * 9 / 18, y0 + h * 15 / 18,
-            x0 + w * 6 / 18, y0 + h * 11 / 18,
-            x0 + w * 3 / 18, y0 + h * 11 / 18,
-            fill=color, outline="",
-        )
-        for span in (5, 8):
-            canvas.create_arc(
-                cx - w * span / 18, cy - h * span / 18,
-                cx + w * span / 18, cy + h * span / 18,
-                start=-50, extent=100, style=tk.ARC, outline=color, width=1.6,
-            )
-    elif name == "microphone":
-        # Capsule, then the cradle arc *below* it, then the stand: at 18px the
-        # three parts need clear air between them or they merge into a blob.
-        cap_w = w * 2.5 / 18
-        draw_rounded_rect(
-            canvas, cx - cap_w, y0 + h * 2 / 18, cx + cap_w, y0 + h * 9.5 / 18,
-            cap_w, fill=color, outline="",
-        )
-        arc_r = w * 5 / 18
-        arc_cy = y0 + h * 8 / 18
-        canvas.create_arc(
-            cx - arc_r, arc_cy - arc_r, cx + arc_r, arc_cy + arc_r,
-            start=200, extent=140, style=tk.ARC, outline=color, width=1.6,
-        )
-        base_y = y0 + h * 15.5 / 18
-        canvas.create_line(cx, y0 + h * 13 / 18, cx, base_y, fill=color, width=1.6)
-        canvas.create_line(
-            cx - w * 3 / 18, base_y, cx + w * 3 / 18, base_y,
-            fill=color, width=1.6, capstyle=tk.ROUND,
-        )
-    elif name == "reset":
-        canvas.create_arc(
-            x0 + w * 0.08, y0 + h * 0.08, x1 - w * 0.22, y1 - h * 0.08,
-            start=25, extent=280, style=tk.ARC, outline=color, width=1.6,
-        )
-        ax, ay = x1 - w * 0.26, y0 + h * 0.12
-        canvas.create_line(ax, ay, ax, ay + h * 0.3, fill=color, width=1.6, capstyle=tk.ROUND)
-        canvas.create_line(ax, ay, ax - w * 0.3, ay, fill=color, width=1.6, capstyle=tk.ROUND)
-
-
 class IconBadge(tk.Canvas):
     """Rounded square badge (dark background) with a small centered icon."""
 
     SIZE = 36
+    ICON_SIZE = 22
 
     def __init__(self, parent: tk.Misc, icon: str, bg: str = theme.BG_WINDOW, badge_bg: str = BADGE_BG, radius: int = 8):
         super().__init__(parent, width=self.SIZE, height=self.SIZE, highlightthickness=0, bg=bg, bd=0)
@@ -203,8 +69,9 @@ class IconBadge(tk.Canvas):
         badge_bg = self._badge_bg if self._enabled else theme.BG_TRACK_DISABLED
         color = ICON_COLOR if self._enabled else theme.FG_THUMB_DISABLED
         draw_rounded_rect(self, 0, 0, self.SIZE, self.SIZE, self._radius, fill=badge_bg, outline="")
-        pad = self.SIZE * 9 / 36
-        draw_icon(self, self._icon, pad, pad, self.SIZE - pad, self.SIZE - pad, color=color)
+        photo = icons.get(self._icon, self.ICON_SIZE, color)
+        if photo is not None:
+            self.create_image(self.SIZE / 2, self.SIZE / 2, image=photo)
 
 
 class ToggleSwitch(tk.Canvas):
@@ -465,8 +332,9 @@ class RoundedButton(tk.Canvas):
             text_w = f.measure(self._text)
             content_w = self._icon_size + self._icon_gap + text_w
             start_x = (width - content_w) / 2
-            icon_y0 = (height - self._icon_size) / 2
-            draw_icon(self, self._icon, start_x, icon_y0, start_x + self._icon_size, icon_y0 + self._icon_size, color=fg)
+            photo = icons.get(self._icon, self._icon_size, fg)
+            if photo is not None:
+                self.create_image(start_x, height / 2, image=photo, anchor="w")
             text_x = start_x + self._icon_size + self._icon_gap
             self.create_text(text_x, height / 2, text=self._text, fill=fg, font=self._font, anchor="w")
         else:
@@ -862,11 +730,9 @@ class SidebarItem(tk.Canvas):
             )
 
         icon_x = self.PADX + 12
-        icon_y = (self.HEIGHT - self.ICON_SIZE) / 2
-        draw_icon(
-            self, self._icon, icon_x, icon_y,
-            icon_x + self.ICON_SIZE, icon_y + self.ICON_SIZE, color=fg,
-        )
+        photo = icons.get(self._icon, self.ICON_SIZE, fg)
+        if photo is not None:
+            self.create_image(icon_x, self.HEIGHT / 2, image=photo, anchor="w")
         self.create_text(
             icon_x + self.ICON_SIZE + self.ICON_GAP, self.HEIGHT / 2,
             text=self._text, fill=fg, font=self._font, anchor="w",
@@ -930,7 +796,11 @@ class VolumeSlider(tk.Frame):
     def _redraw_icon(self) -> None:
         self._icon_canvas.delete("all")
         color = ICON_COLOR if self._enabled else theme.FG_THUMB_DISABLED
-        draw_icon(self._icon_canvas, self._icon, 0, 0, self.ICON_SIZE, self.ICON_SIZE, color=color)
+        photo = icons.get(self._icon, self.ICON_SIZE, color)
+        if photo is not None:
+            self._icon_canvas.create_image(
+                self.ICON_SIZE / 2, self.ICON_SIZE / 2, image=photo,
+            )
 
     def _render_percent(self) -> None:
         text = f"{int(round(self._variable.get()))}%" if self._value_known else "--"

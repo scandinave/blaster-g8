@@ -10,6 +10,14 @@ Files: debian/*
 Copyright: 2026 Romain LE BARO
 License: MIT
 
+Files: assets/bootstrap-icons/*
+ soundblaster_g8/gui/icon_data.py
+Copyright: 2019-2024 The Bootstrap Authors
+License: MIT
+Comment: Bootstrap Icons v1.13.1 (https://icons.getbootstrap.com). The
+ generated module icon_data.py holds alpha masks rasterized from those .svg
+ by tools/build_icons.py.
+
 License: MIT
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal

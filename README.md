@@ -24,6 +24,14 @@ identified (see *Contributing to the reverse engineering* below).
 The interface is bilingual (English/French), with a language selector in
 the header; the choice persists across restarts.
 
+The pictograms are [Bootstrap Icons](https://icons.getbootstrap.com) (MIT),
+**bundled in the repository** — nothing is fetched over the network at
+runtime. The `.svg` under `assets/bootstrap-icons/` are build sources:
+`tools/build_icons.py` rasterizes them into alpha masks
+(`soundblaster_g8/gui/icon_data.py`, generated and committed) that the GUI
+tints on the fly to match each widget's state. Only regenerating them needs
+`cairosvg` (`pip install -e '.[build]'`).
+
 A sidebar on the left holds the application's menu — only **Devices**
 (the card's controls) is implemented so far, *Playback*, *Recording* and
 *Settings* are shown greyed out — and, at its foot, two sliders for the
@@ -505,10 +513,12 @@ launch.
 ```
 OpenCreativeApp/
 ├── main.py                      # GUI entry point
+├── assets/bootstrap-icons/      # vendored Bootstrap Icons .svg (build sources)
 ├── tools/g8_probe.py            # diagnostic / reverse-engineering CLI
 ├── tools/extract_sound_modes.py # generates sound_modes.py from pcap captures
 ├── tools/extract_crystalvoice_presets.py # generates crystalvoice_presets.py from pcap captures
 ├── tools/compile_translations.py # compiles .po translation catalogs to .mo
+├── tools/build_icons.py         # rasterizes the .svg icons into gui/icon_data.py
 ├── udev/99-soundblaster-g8.rules
 └── soundblaster_g8/
     ├── hidbackend.py            # hidapi backend selection (platform-specific)
@@ -522,6 +532,8 @@ OpenCreativeApp/
     └── gui/
         ├── main_window.py
         ├── sidebar.py            # left navigation menu + PC volume sliders
+        ├── icons.py              # Bootstrap Icons: tinting + PhotoImage cache
+        ├── icon_data.py          # generated alpha masks (see build_icons.py)
         ├── eq_panel.py
         ├── crystalvoice_panel.py
         ├── decoder_panel.py

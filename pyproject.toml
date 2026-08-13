@@ -12,7 +12,10 @@ dependencies = ["hidapi>=0.10.0"]
 
 [project.optional-dependencies]
 hid = ["hidapi>=0.10.0"]
-build = ["pyinstaller>=6.0"]
+# cairosvg is only needed to regenerate gui/icon_data.py from the bundled
+# Bootstrap SVGs (tools/build_icons.py); the generated module is committed, so
+# running the application never requires it.
+build = ["pyinstaller>=6.0", "cairosvg>=2.7"]
 
 [project.scripts]
 soundblaster-g8 = "soundblaster_g8.__main__:main"
