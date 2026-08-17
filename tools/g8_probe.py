@@ -301,11 +301,11 @@ def cmd_selftest() -> int:
         protocol.build_set_crystalvoice_float(protocol.PARAM_CV_SMART_VOICE, 0.0).hex(),
         "5a120701952c00000000",
     )
-    # The three decoder modes, byte for byte from Decodeur.pcapng.
+    # The three decoder modes, byte for byte.
     for mode_name, mode_value, expected in (
-        ("Normal", 1.0, "5a12070197020000803f"),
-        ("Full", 3.0, "5a120701970200004040"),
-        ("Night", 2.0, "5a120701970200000040"),
+        ("Normal", 2.0, "5a120701970200000040"),
+        ("Full", 1.0, "5a12070197020000803f"),
+        ("Night", 3.0, "5a120701970200004040"),
     ):
         ok &= _check(
             f"SET_FLOAT (Decoder {mode_name})",
@@ -393,7 +393,7 @@ def main() -> int:
     parser.add_argument("--duration", type=float, default=60.0,
                         help="listening duration in seconds (default: 60)")
     parser.add_argument("--selftest", action="store_true",
-                        help="check encoding/decoding against the pcap (no hardware needed)")
+                        help="check encoding/decoding against known-good frames (no hardware needed)")
     parser.add_argument("--debug", action="store_true", help="verbose logging")
 
     args = parser.parse_args()

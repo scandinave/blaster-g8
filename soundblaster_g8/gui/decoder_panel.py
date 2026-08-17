@@ -5,7 +5,7 @@ Page embedded in ``MainWindow`` (no floating window): see ``main_window.py``
 for navigation (``_show_decoder_page``/``_show_main_page``). The three modes
 (Normal / Full / Night) are mutually exclusive and each one is a single
 ``CMD_SET_FLOAT`` write with a dedicated TLV marker
-(``protocol.TLV_DECODER``), confirmed by the ``Decodeur.pcapng`` capture -
+(``protocol.TLV_DECODER``), confirmed by a Wireshark capture -
 same mechanism as the equalizer and CrystalVoice, see
 ``driver.set_decoder_mode``.
 

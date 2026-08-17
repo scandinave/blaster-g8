@@ -8,11 +8,11 @@
 | **Direct Mode** | ✅ Working | `0x39` frame validated, state read + reconnection after the card's USB reset |
 | **Sound Mode** | ✅ Working | 51 modes (games, music, generic equalizers) reverse-engineered from dedicated captures, `0x12` frame per parameter |
 | **10-band equalizer + Preamp** | ✅ Working | Manual editing via slider, `0x12` frame per band, validated on hardware |
-| **Bass / Treble** | ⚠️ Approximate | No dedicated parameter on the card: rewrites the 10 bands based on a curve estimated from `Equalizer-manual.pcapng`, not guaranteed identical to Creative |
-| **CrystalVoice** (Noise Reduction, Acoustic Echo Cancellation, Smart Volume) | ✅ Working | `0x12` frame per parameter, same mechanism as the equalizer but with a dedicated TLV marker (`0x95`), reverse-engineered from the `CrystalVoice-*.pcapng` captures |
+| **Bass / Treble** | ⚠️ Approximate | No dedicated parameter on the card: rewrites the 10 bands based on a curve estimated from a Wireshark capture, not guaranteed identical to Creative |
+| **CrystalVoice** (Noise Reduction, Acoustic Echo Cancellation, Smart Volume) | ✅ Working | `0x12` frame per parameter, same mechanism as the equalizer but with a dedicated TLV marker (`0x95`), reverse-engineered from Wireshark captures |
 | **Voice Morph** | ✅ Working | 18 presets replayed as a sequence of 8 `0x12` writes (marker `0x95`), plus a dedicated on/off parameter |
 | **Microphone Equalizer** | ✅ Working | 9 presets replayed as a sequence of 10 `0x12` writes (marker `0x95`), plus a dedicated on/off parameter |
-| **Decoder** (Dolby Digital, Dynamic Range Control) | ✅ Working | 3 modes (Normal / Full / Night), one `0x12` write with a third TLV marker (`0x97`), reverse-engineered from `Decodeur.pcapng` |
+| **Decoder** (Dolby Digital, Dynamic Range Control) | ✅ Working | 3 modes (Normal / Full / Night), one `0x12` write with a third TLV marker (`0x97`), reverse-engineered from a Wireshark capture |
 
 Unimplemented features are greyed out in the interface: they don't
 pretend to act on the card until the corresponding frame has been
@@ -105,7 +105,7 @@ accessors `Frame.dm_ack_param` / `Frame.dm_ack_value`.
 ### USB reset after a Direct Mode toggle
 
 Direct Mode reconfigures the audio chain: **the card re-enumerates**.
-Timeline measured on the pcap, starting from the `0x39` command:
+Timeline measured on a Wireshark capture, starting from the `0x39` command:
 
 | Time | Event |
 |---|---|
@@ -144,9 +144,8 @@ Parameter dump (type 0x11):
 
 ### Sound Mode (type `0x12`, confirmed)
 
-Each sound mode of the Creative application (one
-`Equalizer-*.pcapng` file per mode in the dedicated captures) sends an
-ordered sequence of **`CMD_SET_FLOAT`** writes:
+Each sound mode of the Creative application (one dedicated Wireshark
+capture per mode) sends an ordered sequence of **`CMD_SET_FLOAT`** writes:
 
 ```
 payload (7 bytes) = 0x01 0x96 <param_id:1> <value:f32 LE>
@@ -165,10 +164,10 @@ ACK                          : 5a 02 0a 12 00 ...
 - param `0x0a`: **Preamp** (input gain, in dB)
 
 ⚠️ `0x0a` was `0.0` in all 51 sound-mode captures, which initially
-suggested a preset id ("0 = manual"). The
-`Equalizer-manual.pcapng` capture (individual slider variations, sliding
-from `+6.1` to `-8.5`) shows it's actually a full-fledged slider, just
-like a band - simply left at 0 dB by all captured modes.
+suggested a preset id ("0 = manual"). A Wireshark capture of individual
+slider variations (sliding from `+6.1` to `-8.5`) shows it's actually a
+full-fledged slider, just like a band - simply left at 0 dB by all
+captured modes.
 
 Other parameters appear depending on the mode (`0x02`, `0x04`/`0x05`,
 `0x07`/`0x08`, `0x18`/`0x19`...), probably sub-settings of the
@@ -182,7 +181,7 @@ The per-mode sequences are generated from the captures by
 
 ### Bass / Treble (approximate, no dedicated parameter)
 
-`Equalizer-manual.pcapng` shows that the Bass and Treble sliders have
+That same capture shows that the Bass and Treble sliders have
 **no** parameter of their own: moving them rewrites the existing 10 bands
 (`0x0b`-`0x14`) with a "tilt" curve (decreasing emphasis from one end of
 the spectrum, the other end left unchanged). `controller
@@ -194,7 +193,7 @@ a complete parametric capture (several isolated slider positions).
 
 ### Equalizer activation
 
-`Equalizer-manual.pcapng` contains no write to `param 0x09`: the Creative
+It contains no write to `param 0x09`: the Creative
 app enables the equalizer elsewhere (probably when opening the EQ tab),
 not on every slider gesture. Without this, band writes are indeed
 acknowledged by the card but remain inaudible while the EQ master is off
@@ -216,7 +215,7 @@ ACK                        : 5a 02 0a 12 00 ...
 dump (0x11)                : ... 95 04 00 00 80 3f ...  (kind=0x95, param=0x04, value=1.0)
 ```
 
-Parameters confirmed from the `CrystalVoice-*.pcapng` captures:
+Parameters confirmed from Wireshark captures:
 
 - param `0x00`: Acoustic Echo Cancellation (0/1)
 - param `0x04`: Noise Reduction on/off (0/1)
@@ -262,17 +261,17 @@ capture error.
 
 A third float namespace on the same `CMD_SET_FLOAT` frame, with marker
 **`0x97`**. One click on a mode = one write, acknowledged then echoed in the
-`0x11` dump, as captured in `Decodeur.pcapng`:
+`0x11` dump:
 
 ```
-Normal : 5a 12 07 01 97 02 00 00 80 3f   (param 0x02 = 1.0)
-Full   : 5a 12 07 01 97 02 00 00 40 40   (param 0x02 = 3.0)
-Night  : 5a 12 07 01 97 02 00 00 00 40   (param 0x02 = 2.0)
+Normal : 5a 12 07 01 97 02 00 00 00 40   (param 0x02 = 2.0)
+Full   : 5a 12 07 01 97 02 00 00 80 3f   (param 0x02 = 1.0)
+Night  : 5a 12 07 01 97 02 00 00 40 40   (param 0x02 = 3.0)
 ACK    : 5a 02 0a 12 00 ...
 dump   : 5a 11 08 01 00 97 02 <f32>      (kind=0x97, param=0x02)
 ```
 
 The values are **not** contiguous with the display order (Normal, Full,
-Night): they are read from the capture, not inferred. As for Scout Mode and
-Sound Mode, no read frame for the active mode has been observed, so the GUI
-tracks the last acknowledged command (`controller.DECODER_MODES`).
+Night). As for Scout Mode and Sound Mode, no read
+frame for the active mode has been observed, so the GUI tracks the last
+acknowledged command (`controller.DECODER_MODES`).

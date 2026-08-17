@@ -5,7 +5,7 @@ The protocol (framing, opcodes, parameter identifiers) is isolated in
 :mod:`soundblaster_g8.protocol`, hidapi backend selection in
 :mod:`soundblaster_g8.hidbackend`. This module only handles HID I/O.
 
-Key implementation points (from pcap analysis):
+Key implementation points (from Wireshark capture analysis):
 
 1. The card exposes two HID interfaces. The control channel is the one
    with *usage page* ``0xFF01`` (interface 4). Opening the device via
@@ -55,7 +55,7 @@ DRAIN_TIMEOUT_MS = 5
 PROBE_TIMEOUT_MS = 400
 
 # Reconnection after the USB reset triggered by toggling Direct Mode.
-# Pcap timeline: reset at +0.6 s, device reappears at +1.3 s.
+# Capture timeline: reset at +0.6 s, device reappears at +1.3 s.
 RECONNECT_TIMEOUT_S = 12.0
 RECONNECT_INTERVAL_S = 0.25
 RECONNECT_GRACE_S = 1.0
@@ -359,7 +359,7 @@ class SoundBlasterG8Driver:
     ) -> bool:
         """Reopens the control channel after a USB reset of the card.
 
-        Timeline observed in the pcap, starting from the 0x39 command:
+        Timeline observed in the Wireshark capture, starting from the 0x39 command:
         reset/disconnect at +0.6 s, device reappears at +1.3 s. So we wait
         one grace second before starting to re-enumerate, then retry until
         the *deadline*: on Linux, ``udev`` may not yet have applied
@@ -461,7 +461,7 @@ class SoundBlasterG8Driver:
         """A real round-trip with the card: ``5a 09 01 02`` -> 0x09 response.
 
         The response contains the firmware version string
-        (``1.2.250819.0903`` on the reference card, confirmed by the pcap).
+        (``1.2.250819.0903`` on the reference card, confirmed by the capture).
         Used to make sure we haven't reopened the dying node left by the
         USB reset: that one accepts the ``open`` but no longer responds.
         """
@@ -786,7 +786,7 @@ class SoundBlasterG8Driver:
     def get_scout_mode(self) -> Optional[bool]:
         """Scout Mode state based on the last ACK received.
 
-        The read command hasn't been identified in the pcap yet: we rely
+        The read command hasn't been identified yet: we rely
         on the echo of commands already sent. Returns ``None`` if the
         state is unknown.
         """
@@ -994,7 +994,7 @@ class SoundBlasterG8Driver:
         return self._state.params.get((protocol.TLV_FLOAT, protocol.PARAM_PREAMP))
 
     # ------------------------------------------------------------------
-    # CrystalVoice (confirmed by the CrystalVoice-*.pcapng captures)
+    # CrystalVoice (confirmed by Wireshark captures)
     # ------------------------------------------------------------------
 
     def set_crystalvoice_param(self, param: int, value: float) -> bool:
@@ -1080,7 +1080,7 @@ class SoundBlasterG8Driver:
         return None if value is None else bool(value)
 
     # ------------------------------------------------------------------
-    # Decoder (confirmed by the Decodeur.pcapng capture)
+    # Decoder (confirmed by a Wireshark capture)
     # ------------------------------------------------------------------
 
     def set_decoder_mode(self, value: float) -> bool:

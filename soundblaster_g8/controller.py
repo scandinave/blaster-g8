@@ -27,13 +27,12 @@ SUPPORTED_FEATURES = frozenset(
 )
 
 #: Dolby Digital decoder modes, as ``(slug, label, written f32 value)``, in
-#: the Creative application's display order. The values are the ones observed
-#: in ``Decodeur.pcapng`` (Normal, Full then Night clicked in that order):
-#: they are deliberately not contiguous with the display order.
+#: the Creative application's display order. Deliberately not contiguous with
+#: the display order.
 DECODER_MODES = (
-    ("normal", "Normal", 1.0),
-    ("full", "Full", 3.0),
-    ("night", "Night", 2.0),
+    ("normal", "Normal", 2.0),
+    ("full", "Full", 1.0),
+    ("night", "Night", 3.0),
 )
 
 #: Mode assumed active as long as the card hasn't reported one (no read
@@ -42,7 +41,7 @@ DEFAULT_DECODER_MODE = "normal"
 
 #: "Tilt" weights for the Bass/Treble sliders (bands 0x0b..0x14, in that
 #: order). These two sliders have no dedicated parameter on the card: in
-#: the ``Equalizer-manual.pcapng`` capture, moving them rewrites the 10
+#: a dedicated Wireshark capture, moving them rewrites the 10
 #: existing bands with a curve decreasing from one end of the spectrum. The
 #: weights below are the deltas measured in that capture, normalized so a
 #: slider at +12 dB reproduces the captured gesture: this is an
@@ -678,7 +677,7 @@ class SoundBlasterController:
     ) -> bool:
         """Applies a Bass/Treble slider move across the 10 bands.
 
-        Approximation derived from ``Equalizer-manual.pcapng`` (see
+        Approximation derived from a dedicated Wireshark capture (see
         ``BASS_TILT_WEIGHTS``/``TREBLE_TILT_WEIGHTS``): unlike a band or
         the Preamp, there's no dedicated parameter on the card - only the
         **delta** from the slider's previous position is weighted per band

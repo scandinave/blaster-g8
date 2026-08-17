@@ -3,8 +3,7 @@ Creative Sound Blaster G8 vendor HID protocol.
 
 This module does *no* I/O: it only encodes and decodes frames. Everything
 below was deduced from USB captures (tshark) of the official Creative
-application turning Scout Mode and Direct Mode on then off
-(``DirectModeOffpcapng.pcapng``).
+application turning Scout Mode and Direct Mode on then off.
 
 Observed USB topology
 ----------------------
@@ -71,7 +70,7 @@ Card -> host direction
 USB reset after toggling Direct Mode
 ------------------------------------
 Direct Mode reconfigures the audio chain: the card **re-enumerates**. The
-pcap timeline, starting from the emission of the 0x39 command:
+capture timeline, starting from the emission of the 0x39 command:
 
     +0.0002 s : ACK 5a 02 0a 39 00 ...
     +0.005  s : 0x1a notifications then 0x11 dumps
@@ -146,13 +145,13 @@ observed captures, left as-is).
     param 0x0a        : Preamp (input gain, in dB)
 
 ``param 0x0a`` was ``0.0`` in all 51 sound-mode captures, which initially
-suggested a preset id ("0 = manual"). The ``Equalizer-manual.pcapng``
-capture (individual slider variations) shows this same parameter sliding
+suggested a preset id ("0 = manual"). A dedicated Wireshark capture of the
+individual slider variations shows this same parameter sliding
 continuously from ``+6.1`` to ``-8.5``, exactly like an EQ band: it's
 actually the **Preamp** slider, simply left at 0 dB by all captured modes.
 
-A Creative application "sound mode" (one ``Equalizer-*.pcapng`` file per
-mode in the provided captures) is an ordered sequence of these ``0x12``
+A Creative application "sound mode" (one dedicated Wireshark capture per
+mode) is an ordered sequence of these ``0x12``
 writes; the card's ACK is ``5a 02 0a 12 00 ...``
 (``Frame.ack_command``/``Frame.ack_status``/``Frame.ack_ok`` suffice, the
 ACK layout doesn't follow ``0x26``'s). No USB reset is triggered by these
@@ -163,7 +162,7 @@ CrystalVoice parameters (same 0x12 frame, marker ``TLV_CRYSTALVOICE``)
 ----------------------------------------------------------------------
 CrystalVoice reuses the same numeric param ids as the equalizer, which is
 exactly why the marker (0x95 instead of 0x96) has to be part of the key -
-see :class:`DecodedState`. From the ``CrystalVoice-*.pcapng`` captures:
+see :class:`DecodedState`. From Wireshark captures of CrystalVoice:
 
     param 0x00        : Acoustic Echo Cancellation (0/1)
     param 0x04        : Noise Reduction (0/1)
@@ -182,10 +181,10 @@ ACK'd but inaudible. See :mod:`soundblaster_g8.crystalvoice_presets`.
 Decoder parameters (same 0x12 frame, marker ``TLV_DECODER``)
 ------------------------------------------------------------
 The Dolby Digital decoder's Dynamic Range Control is a third namespace on
-the same frame, with marker 0x97. From ``Decodeur.pcapng`` (one write per
+the same frame, with marker 0x97. From a Wireshark capture (one write per
 click, each ACK'd by ``5a 02 0a 12 00`` then echoed in a 0x11 dump):
 
-    param 0x02        : DRC mode, 1.0 = Normal, 3.0 = Full, 2.0 = Night
+    param 0x02        : DRC mode, 2.0 = Normal, 1.0 = Full, 3.0 = Night
 
 The values aren't contiguous with the display order (Normal, Full, Night):
 they were read from the capture, not inferred. As for Scout Mode and Sound
@@ -229,12 +228,12 @@ TLV_FLOAT = 0x96
 
 #: Marker for CrystalVoice float parameters (distinct namespace from
 #: TLV_FLOAT: EQ/sound-mode and CrystalVoice params reuse the same numeric
-#: ids, e.g. param 0x00, so the marker is what disambiguates them - see
-#: CrystalVoice-*.pcapng captures).
+#: ids, e.g. param 0x00, so the marker is what disambiguates them - per
+#: Wireshark captures).
 TLV_CRYSTALVOICE = 0x95
 
 #: Marker for the Dolby Digital decoder's parameters (third namespace, same
-#: rationale as TLV_CRYSTALVOICE - see Decodeur.pcapng).
+#: rationale as TLV_CRYSTALVOICE - per Wireshark captures).
 TLV_DECODER = 0x97
 
 # ACK statuses
@@ -248,7 +247,7 @@ STATUS_OK = 0x00
 FEATURE_SCOUT = 0x07
 PARAM_SCOUT_ENABLED = 0x0002
 
-#: (feature, param) confirmed by pcap analysis
+#: (feature, param) confirmed by Wireshark capture analysis
 SCOUT_MODE = (FEATURE_SCOUT, PARAM_SCOUT_ENABLED)
 
 # Direct Mode - identifiers extracted from the USB captures
@@ -263,8 +262,8 @@ PARAM_EQ_ENABLED = 0x09  # equalizer on/off (0/1)
 PARAM_PREAMP = 0x0A  # Preamp (input gain, in dB)
 EQ_BAND_PARAMS = tuple(range(0x0B, 0x15))  # the 10 bands, in dB
 
-# CrystalVoice - parameter identifiers extracted from the
-# CrystalVoice-*.pcapng captures (CMD_SET_FLOAT, marker TLV_CRYSTALVOICE).
+# CrystalVoice - parameter identifiers extracted from Wireshark captures
+# (CMD_SET_FLOAT, marker TLV_CRYSTALVOICE).
 PARAM_CV_ECHO_CANCELLATION = 0x00  # Acoustic Echo Cancellation on/off
 PARAM_CV_NOISE_REDUCTION_ENABLED = 0x04  # Noise Reduction on/off
 PARAM_CV_NOISE_REDUCTION_LEVEL = 0x05  # Noise Reduction level, 0.0-1.0
@@ -279,7 +278,7 @@ CV_VOICE_MORPH_PARAMS = tuple(range(0x0B, 0x13))
 #: The 10 Microphone Equalizer bands, in dB (same idea).
 CV_MIC_EQ_BAND_PARAMS = tuple(range(0x14, 0x1E))
 
-# Decoder - parameter identifier extracted from Decodeur.pcapng
+# Decoder - parameter identifier extracted from a Wireshark capture
 # (CMD_SET_FLOAT, marker TLV_DECODER).
 PARAM_DECODER_MODE = 0x02  # Dynamic Range Control mode (1 / 2 / 3)
 

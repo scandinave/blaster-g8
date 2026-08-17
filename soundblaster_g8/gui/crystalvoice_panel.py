@@ -7,8 +7,7 @@ for navigation (``_show_cv_page``/``_show_main_page``). Every toggle, the
 Noise Reduction level slider and the two preset dropdowns use the same
 ``CMD_SET_FLOAT`` mechanism as the equalizer (see
 ``driver.set_crystalvoice_param``), but with a dedicated TLV marker
-(``protocol.TLV_CRYSTALVOICE``) confirmed by the ``CrystalVoice-*.pcapng``
-captures.
+(``protocol.TLV_CRYSTALVOICE``) confirmed by Wireshark captures.
 
 Voice Morph and the Microphone Equalizer each pair a toggle with a preset
 selector, mirroring the Creative application: the enable bit and the preset

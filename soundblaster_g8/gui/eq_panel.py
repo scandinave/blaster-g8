@@ -7,7 +7,7 @@ Preamp use the same hardware-validated mechanism as Sound Mode
 (``CMD_SET_FLOAT``, see ``driver.eq_set_band``/``driver.eq_set_preamp``).
 Bass and Treble have no dedicated parameter on the card: see
 ``controller.set_eq_bass``/``set_eq_treble`` for the approximation used
-(derived from the ``Equalizer-manual.pcapng`` capture) - these two sliders
+(derived from a dedicated Wireshark capture) - these two sliders
 stay wherever the user leaves them (like the native Creative app), the
 controller only keeping an internal delta.
 
