@@ -13,7 +13,7 @@ Rules-Requires-Root: no
 
 Package: soundblaster-g8
 Architecture: all
-Depends: ${python3:Depends}, ${misc:Depends}, python3-hid, python3-tk
+Depends: ${python3:Depends}, ${misc:Depends}, python3-hid, python3-tk, python3-setproctitle
 Recommends: alsa-utils
 Description: Control application for the Creative Sound Blaster G8
  Graphical control application for the Creative Sound Blaster G8 USB

@@ -35,8 +35,26 @@ def _cap_malloc_arenas() -> None:
         pass  # not glibc (musl, macOS): nothing to cap
 
 
+def _set_process_name() -> None:
+    """Renames the process from ``python3`` to ``soundblaster-g8``.
+
+    Without this, ``/proc/pid/comm`` and the visible command line stay tied
+    to the Python interpreter, so system monitors (e.g. COSMIC's) show a bare
+    "python3.12" process instead of the app. The name must match
+    ``Exec``/``StartupWMClass`` in ``packaging/soundblaster-g8.desktop`` for
+    monitors that correlate processes with installed desktop entries.
+    """
+    try:
+        import setproctitle
+
+        setproctitle.setproctitle("soundblaster-g8")
+    except (ImportError, OSError):
+        pass  # optional dependency missing, or platform doesn't support it
+
+
 def main():
     """Main function that launches the application."""
+    _set_process_name()
     _cap_malloc_arenas()
 
     from soundblaster_g8.gui import MainWindow
