@@ -901,6 +901,91 @@ class SoundBlasterG8Driver:
         return frame.direct_mode_enabled
 
     # ------------------------------------------------------------------
+    # Logo LED / Energy Saving (confirmed by the "LogoLed" and
+    # "energy-saving" USB captures) - same 0x39 frame family as Direct
+    # Mode, but no USB reset and no read/status frame observed.
+    # ------------------------------------------------------------------
+
+    def _send_toggle_command(self, frame: bytes, param: int, enabled: bool, tag: str) -> bool:
+        """Sends a type-0x39 boolean toggle and verifies its ACK.
+
+        Shared by :meth:`set_logo_led` and :meth:`set_energy_saving`: same
+        ``dm_ack_param``/``dm_ack_value`` layout as Direct Mode's ACK, but
+        no reconnection is needed afterwards.
+        """
+        if self._device is None:
+            _log(f"[simulation] -> {frame.hex()}")
+            return False
+
+        try:
+            ack = self._send_raw(frame, expect="ack", timeout_ms=ACK_TIMEOUT_MS)
+        except SoundBlasterG8Error as exc:
+            _log(f"{tag} ERROR: {exc}")
+            return False
+
+        if ack is None:
+            _log(f"{tag}: no ACK for the 0x39 command (timeout)")
+            return False
+
+        expected = 1 if enabled else 0
+        if ack.dm_ack_param != param or ack.dm_ack_value != expected:
+            _log(f"WARNING: unexpected 0x39 ACK for {tag} ({ack.describe()})")
+            return False
+
+        return True
+
+    def set_logo_led(self, enabled: bool) -> bool:
+        """Enables/disables the Logo LED.
+
+        Frame sent: ``5a 39 03 00 0e 01`` (ON) / ``5a 39 03 00 0e 00`` (OFF),
+        zero-padded to 64 bytes. No USB reset follows, unlike Direct Mode.
+        """
+        action = "enabling" if enabled else "disabling"
+        _log(f"Logo LED: {action}")
+        with self._io_lock:
+            ok = self._send_toggle_command(
+                protocol.build_logo_led(enabled), protocol.PARAM_LOGO_LED, enabled, "Logo LED",
+            )
+        if ok:
+            _log(f"Logo LED {'enabled' if enabled else 'disabled'} (confirmed by the card)")
+        return ok
+
+    def get_logo_led(self) -> Optional[bool]:
+        """Logo LED state based on the last ACK received.
+
+        No read frame was observed for this parameter: same limitation as
+        :meth:`get_scout_mode`. Returns ``None`` if the state is unknown.
+        """
+        value = self.get_feature_cached(protocol.FEATURE_DIRECT_MODE, protocol.PARAM_LOGO_LED)
+        return None if value is None else bool(value)
+
+    def set_energy_saving(self, enabled: bool) -> bool:
+        """Enables/disables Energy Saving.
+
+        Frame sent: ``5a 39 03 00 11 01`` (ON) / ``5a 39 03 00 11 00`` (OFF),
+        zero-padded to 64 bytes. No USB reset follows, unlike Direct Mode.
+        """
+        action = "enabling" if enabled else "disabling"
+        _log(f"Energy Saving: {action}")
+        with self._io_lock:
+            ok = self._send_toggle_command(
+                protocol.build_energy_saving(enabled), protocol.PARAM_ENERGY_SAVING, enabled,
+                "Energy Saving",
+            )
+        if ok:
+            _log(f"Energy Saving {'enabled' if enabled else 'disabled'} (confirmed by the card)")
+        return ok
+
+    def get_energy_saving(self) -> Optional[bool]:
+        """Energy Saving state based on the last ACK received.
+
+        No read frame was observed for this parameter: same limitation as
+        :meth:`get_scout_mode`. Returns ``None`` if the state is unknown.
+        """
+        value = self.get_feature_cached(protocol.FEATURE_DIRECT_MODE, protocol.PARAM_ENERGY_SAVING)
+        return None if value is None else bool(value)
+
+    # ------------------------------------------------------------------
     # Sound mode / equalizer (confirmed by the "Sound Mode" captures)
     # ------------------------------------------------------------------
 

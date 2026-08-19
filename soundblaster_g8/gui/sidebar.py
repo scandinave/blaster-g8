@@ -1,10 +1,10 @@
 """
 Left navigation sidebar of the Sound Blaster G8 application.
 
-Full-height column holding the application's main menu (only "Devices" is
-implemented so far; "Playback", "Recording" and "Settings" are built disabled,
-awaiting their pages) and, at its foot, the two system volume sliders - PC
-output and PC microphone.
+Full-height column holding the application's main menu (only "Devices" and
+"Settings" are implemented so far; "Playback" and "Recording" are built
+disabled, awaiting their pages) and, at its foot, the two system volume
+sliders - PC output and PC microphone.
 
 Like the other panels (see ``decoder_panel.py``), this widget doesn't talk to
 the outside world itself: it exposes ``on_select``/``on_output_volume``/
@@ -26,14 +26,14 @@ SIDEBAR_WIDTH = 200
 #: sliders off the bottom.
 SIDEBAR_MIN_HEIGHT = 420
 
-#: (key, icon glyph, label msgid, implemented) for the menu entries. The three
+#: (key, icon glyph, label msgid, implemented) for the menu entries. The
 #: unimplemented ones are shown disabled rather than hidden: they advertise
 #: what is coming without pretending to work.
 MENU_DEFS = [
     ("devices", "device", "Devices", True),
     ("playback", "playback", "Playback", False),
     ("recording", "recording", "Recording", False),
-    ("settings", "settings", "Settings", False),
+    ("settings", "settings", "Settings", True),
 ]
 
 

@@ -54,6 +54,20 @@ _PACKED: dict[str, dict[int, str]] = {
         18: "c-m!<%?*M;5QV1>2wH=Ro(%CWSP%qlM-ia}1DY5j!5&bt1mJ+{JTznt@3L>dncevzYBhTmI{hgWBIquQn{TZfAsW}(X9h?nBwax~nRp-;Tp7hB&Lzl(%|#(n6E+T)4d0xhAf#3NeK;+Ud;C_7;O|d~#PInf;8sc%U{Ld`!-&Y`K%x;1Q#Lk2E96$EbKO<<<qmhfDH0GP-I@+2wM{RbcMAyQZM4!K`S@o)zc!|H",
         22: "c-n1|OAdlS42GKsvJf}E?x1)Kf?=unU?Ce{(Ibj*1rp*BBnAOJfx}2U#t7O?+i%kTZ3p0O^DLc0)ufE`O!@*nM+4aN!ZrY!(-rW_ndj$7bI)fy>L6Y6irGj9tPI(JTAa%CDAat616`Jl5F?jHI-pR{z*t4hb`sbRD$_;Th>~o2C;yZMRfO^_{YPUfA#Vt3Qj$)fwnep2Mc6!}+M3Sc;d?l$E9UuYUa!0b%?rco#{Iw7Ss?93oVh0|Ab)95i?&tNY>}>t3ohD~A4;X4kDDd&_>;T<-v#){",
     },
+    "leaf-fill": {
+        14: "c-rG)Kn9J@$h>vmTC^D9yuJVb|Ns8*?(26~%UBo~w*UYC?bUxUSjoUJ|NsA=&O85sxo!-FK=P`pRB+{zXaA=#=zs)&tSXN&XZP=AU^wv~3Z6Iv&9?gs<9?O{+L8MY%KI}HWTgvO@w<NKAEIC<h*{gHGBYqd&PI0S^yvVkG+Yw",
+        15: "c-muUKmjFADBMM#b9j-s+y4Lmd1n2pRXesd%R;y?@X3LJVF{4Vdj#RX;9;l-QYR!*R^9vsWW+JJfrM}PaWJsxS3l}!V1ENv_v`-QX%?J7%?)s){^bCT=DrT+|5OL^6>q|1pDhNtguCVzkn?e~qxVlSh}(FTM1Umw_be0-Y?ufDQf_Iu",
+        16: "c-muSKn1DJsQhW~Bbku->;C_LvaCKox1ys&AH?7M9|4xIGcYUz(wja&1!gfYbONbU8cV-{`F|A{B0=;PA$GI4w!Odpr!t8D0SUaFk?N(*BGz5Sz_0~w-1~ZF4h9CZzX%KZKsGib_<uo8U~Gb^cyN6=*o}I#?)>`qVow22(l0R-&&d4GMD^W?E&y2xcvk",
+        18: "c-muRKnGr~=pwamEYL*e{{Oo=QiYv?fmM(jBC_f~0^BNQ1&S>Hj|_IQF)&O4(tkrg!i4G>7>Yo2r_6-M5RrFm431z%4;zEDOUA5w|NomZaC`;}-ERxAkY;3bI_1m2Fdt#=yE&39A`A@Le~|2YECX^;7qa!6K_V>ckcF&3Ld>;aVUG5AwFcr9;q>{tcCT)AV`iB0OBBuHq5qT7M8qFe0sxwHm^J",
+        22: "c-muNzy^eUv5C69RmLJ(`2VRNrfB#7|NpOdg&4>SiYOTy%R)t`{YL@!idjLTQ~slYLwrEdHZXJgKZNiaplB|b6&d^jA#BUQ-~whmSLTXe`xq)Zn}I>#FGSb{sE^+`YT}Lm|E~g>Cm{;{?MO8i16gmr<t>mbLbCtIt>poX4E{h-q0gu;+r<a=M?IQ@H-Saj&!PzjfrX{-po(5$1PhC9LkRtwxbwdkG>kkpegTU;o@Kz`^M3<8L|N2r?e&F0EROHLgs?=!ssE8!L=(S8001Z{<An",
+    },
+    "lightbulb-fill": {
+        14: "c-muNU|@_n{`2RtXhsGQU|#+o3>GticoqMlpajTaeGB8gVqst~{0|5E3=Fmio)rUw)IS*KpBPZ%UKno&$V{z|5Y7j6u!VsTUI3WGz<3?Rxy1zGF&L!*ff1C$khvQOGGIKhNB{pn0vXQ$03ttRum",
+        15: "c-muNU|`T#`11er1?mhC5dPyo2z(C(^NfD|hk&03Anw-xFt8EG<M;*V{$OWdkpGVWG7Jp-|KPm8JV4cF;M@}+qk`dFf3Qsxp}c;GGg$6{dH0y1&ME?Pi=aFPR%0MAVuf*y?}C64jLR??sCE*V1pv)&bC3",
+        16: "c-muNU|`@VIsfbDxk3&G2#~+}9}F(bfw`PeE>HlhqU1ju6oUBY5&SbC{tpEI8;JiCjeicoKLz3!BlvkBKF4Jk_aZyk0dg-P+!wM?2UbD&l~68&$R`l@qX+{o@DwEf7{Ryt^8f!AOE41vdHsWO",
+        18: "c-muN00Obrt3Q8TX%c0C0q=MJ!Qh=IRKWSye<=9r02bhQ^dAoHvx7w9{v&}XkjO%0k@+Bzy~rZFKq6a_MK*v$T9HNSK_c4!5CVVIz}C+~h)jjJkn<o+-~b2I(Q>~b0>9<p9$N_!SqT?l(47eeItURiXBQxF=0b=#{s3wE;eZff$oupE|DPNP8vu(0rbq",
+        22: "c-muN00YapcYgo5Guxa22?(zI4+YEl;ew*q{=>m#5vU;3zW+#ICnH2O>OTqyg@_(U6+H~G>MyG3U$BMd|IvU6NYox()EXqJfi9{95@mjiD)<uOv?-{f6Cf^={fsR5Q3~q0=zj>of8p?es6>dCA;OI1F--6&D^gI_z(lK&16cIpT`;&P%0LisZ`=(A8@Z50**8Os-Nc5XnEwJu@Ek1G02Dp=M*",
+    },
     "mic-fill": {
         14: "c-muNU|?Wu{`jGRkpT)~{sTccj5i0wn+@a52l3`(<B7;Yc=943UP3*DS04}Jg?CQ?@p^hgKs?#Yx?leP|Ezsg3aoL`WS!m~?P+}wV^}6!?eD+Z#|*PVdiHE71_UT5fHR}--hK1t?%gOL697(2K)e",
         15: "c-muN00OhK|IU~&zyR;-|NsBL<biQL{)2!Uj2i&v1`xwlS^(uPR0MJL5BPz(z6bR{T#<(ge}KH-a!-W7s&_>c{rUepKV}<5v-+bbd2jichbmB$)pk5S^mv;J+?5PM9|akZ!FvQ#?d`jF|K7cO15ynDqee<v",

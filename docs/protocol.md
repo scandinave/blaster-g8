@@ -6,6 +6,8 @@
 |---|---|---|
 | **Scout Mode** | ✅ Working | Frame validated on hardware, USB traffic identical to the Creative application |
 | **Direct Mode** | ✅ Working | `0x39` frame validated, state read + reconnection after the card's USB reset |
+| **Logo LED** | ✅ Working | `0x39` frame, param `0x0e`, same shape as Direct Mode but no USB reset (no read frame observed - cached state) |
+| **Energy Saving** | ✅ Working | `0x39` frame, param `0x11`, same shape as Direct Mode but no USB reset (no read frame observed - cached state) |
 | **Sound Mode** | ✅ Working | 51 modes (games, music, generic equalizers) reverse-engineered from dedicated captures, `0x12` frame per parameter |
 | **10-band equalizer + Preamp** | ✅ Working | Manual editing via slider, `0x12` frame per band, validated on hardware |
 | **Bass / Treble** | ⚠️ Approximate | No dedicated parameter on the card: rewrites the 10 bands based on a curve estimated from a Wireshark capture, not guaranteed identical to Creative |
@@ -101,6 +103,24 @@ response       : 5a 39 05 01 <bits> 40 00 00   (bit 0x20 -> Direct Mode active)
 `<cmd> <status> <param> <value>` instead of
 `<cmd> <status> <feature> <param:u16> <value:u16>`. Hence the dedicated
 accessors `Frame.dm_ack_param` / `Frame.dm_ack_value`.
+
+### Logo LED / Energy Saving (type `0x39`, same shape)
+
+The `0x39` frame is actually a generic boolean toggle, not specific to
+Direct Mode: the "LogoLed" and "energy-saving" captures show the exact same
+`<feature 0x00> <param> <value>` write, just with a different `param`:
+
+```
+LED ON         : 5a 39 03 00 0e 01      -> ACK 5a 02 0a 39 00 0e 01
+LED OFF        : 5a 39 03 00 0e 00      -> ACK 5a 02 0a 39 00 0e 00
+Energy ON      : 5a 39 03 00 11 01      -> ACK 5a 02 0a 39 00 11 01
+Energy OFF     : 5a 39 03 00 11 00      -> ACK 5a 02 0a 39 00 11 00
+```
+
+Unlike Direct Mode, **neither toggle triggers a USB reset** (14 USB frames
+total per capture, no disconnect/reconnect burst), and no read/status frame
+was observed for either - state is cached from the last ACK, same
+limitation as Scout Mode.
 
 ### USB reset after a Direct Mode toggle
 

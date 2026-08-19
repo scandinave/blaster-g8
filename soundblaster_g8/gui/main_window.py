@@ -10,14 +10,15 @@ and takes 2 to 4 seconds, which would freeze the window if done in the Tk
 callback. Commands are executed one at a time, in submission order, and the
 result is brought back to the GUI thread via ``self.after(0, ...)``.
 
-The window holds four "pages" (main page / Equalizer page / CrystalVoice
-page / Decoder page) in the same container, only one packed at a time (no
-floating window): see ``_show_main_page``/``_show_eq_page``/``_show_cv_page``/
-``_show_decoder_page``. They live in the right-hand column, next to the
-full-height navigation sidebar (``sidebar.py``); the Equalizer, CrystalVoice
-and Decoder pages stay sub-pages of "Devices", reached by clicking a row and
-left with the Back button, so "Devices" remains the selected menu entry
-throughout.
+The window holds five "pages" (main page / Equalizer page / CrystalVoice
+page / Decoder page / Settings page) in the same container, only one packed
+at a time (no floating window): see ``_show_main_page``/``_show_eq_page``/
+``_show_cv_page``/``_show_decoder_page``/``_show_settings_page``. They live
+in the right-hand column, next to the full-height navigation sidebar
+(``sidebar.py``); the Equalizer, CrystalVoice and Decoder pages stay
+sub-pages of "Devices", reached by clicking a row and left with the Back
+button, so "Devices" remains the selected menu entry throughout, while
+Settings is its own top-level sidebar destination (no Back button).
 
 The sidebar's two volume sliders drive the *system* volume (see
 ``system_volume.py``), not the card's own registers: they go through the same
@@ -46,6 +47,13 @@ ASSETS_DIR = Path(__file__).parent / "assets"
 TOGGLE_DEFS = [
     ("direct_mode", "direct", "Direct Mode", "No signal processing"),
     ("scout_mode", "scout", "Scout Mode", "In-game sound detection"),
+]
+
+#: (feature key, icon glyph, title msgid, subtitle msgid) for the toggle
+#: rows on the Settings page.
+SETTINGS_TOGGLE_DEFS = [
+    ("logo_led", "led", "Logo LED", "Illuminates the G8's logo"),
+    ("energy_saving", "energy_saving", "Power Saving", "Reduces power use when idle"),
 ]
 
 
@@ -81,6 +89,8 @@ class MainWindow(tk.Tk):
         # Toggle state
         self._direct_mode_var = tk.BooleanVar(value=False)
         self._scout_mode_var = tk.BooleanVar(value=False)
+        self._logo_led_var = tk.BooleanVar(value=False)
+        self._energy_saving_var = tk.BooleanVar(value=False)
 
         # Sound mode: parallel lists (slugs/labels) driving the SplitSelect.
         self._sound_mode_slugs: list[str] = []
@@ -143,11 +153,18 @@ class MainWindow(tk.Tk):
         self._eq_page = tk.Frame(self._pages_container, bg=theme.BG_WINDOW)
         self._cv_page = tk.Frame(self._pages_container, bg=theme.BG_WINDOW)
         self._decoder_page = tk.Frame(self._pages_container, bg=theme.BG_WINDOW)
-        self._pages = (self._main_page, self._eq_page, self._cv_page, self._decoder_page)
+        self._settings_page = tk.Frame(self._pages_container, bg=theme.BG_WINDOW)
+        self._pages = (
+            self._main_page, self._eq_page, self._cv_page, self._decoder_page,
+            self._settings_page,
+        )
 
         self._setup_main_page(self._main_page)
-        # The panels need the controller and are only built when their page
-        # is first opened (see _ensure_eq_panel & co.).
+        self._setup_settings_page(self._settings_page)
+        # The panels need the controller, built right below: see
+        # _ensure_eq_panel & co., eagerly called after _init_controller so
+        # every page's real content is in place before _fit_window_to_content
+        # measures them.
         self._eq_panel: Optional[EQPanel] = None
         self._cv_panel: Optional[CrystalVoicePanel] = None
         self._decoder_panel: Optional[DecoderPanel] = None
@@ -172,13 +189,18 @@ class MainWindow(tk.Tk):
         divider = tk.Frame(self._content, bg=theme.BORDER_CARD, height=1)
         divider.pack(fill=tk.X, side=tk.BOTTOM)
 
+        # Controller initialization: must happen before the panels are built
+        # (they read the controller) and before the window is sized (feature
+        # availability graying affects some rows' requested size).
+        self._init_controller()
+        self._ensure_eq_panel()
+        self._ensure_cv_panel()
+        self._ensure_decoder_panel()
+
+        self._fit_window_to_content()
         self._show_main_page()
 
-        # Controller initialization
-        self._init_controller()
         self._init_system_volume()
-
-        self._fit_window_to_page()
 
     def _setup_header(self):
         """Shared header: back button (hidden on the main page) + title + language selector."""
@@ -264,6 +286,27 @@ class MainWindow(tk.Tk):
         self._build_sound_mode_row(right)
         self._build_equalizer_row(right)
         self._build_crystalvoice_row(right)
+
+    def _setup_settings_page(self, controls_frame_parent):
+        """Builds the Settings page content: Logo LED and Power Saving toggles."""
+        outer = tk.Frame(controls_frame_parent, bg=theme.BG_WINDOW)
+        outer.pack(expand=True, fill=tk.BOTH, padx=32, pady=(20, 24))
+
+        for key, icon, title_msgid, subtitle_msgid in SETTINGS_TOGGLE_DEFS:
+            var = {
+                "logo_led": self._logo_led_var,
+                "energy_saving": self._energy_saving_var,
+            }[key]
+            handler = {
+                "logo_led": self._on_logo_led_change,
+                "energy_saving": self._on_energy_saving_change,
+            }[key]
+            self._toggle_rows[key] = self._build_toggle_row(
+                outer, icon, title_msgid, subtitle_msgid, var, handler,
+            )
+
+        self._led_toggle_switch = self._toggle_rows["logo_led"]["switch"]
+        self._energy_toggle_switch = self._toggle_rows["energy_saving"]["switch"]
 
     def _build_photo_header(self, parent):
         """Shows the product photo (rounded corners) at the top of the main page."""
@@ -427,11 +470,13 @@ class MainWindow(tk.Tk):
     def _on_sidebar_select(self, key: str) -> None:
         """Handles a click on an enabled sidebar entry.
 
-        Only "Devices" exists so far; the other three are built disabled and
-        never reach this method.
+        Only "Devices" and "Settings" exist so far; "Playback" and
+        "Recording" are built disabled and never reach this method.
         """
         if key == "devices":
             self._show_main_page()
+        elif key == "settings":
+            self._show_settings_page()
 
     def _init_system_volume(self) -> None:
         """Fills the sidebar sliders and starts watching for outside changes."""
@@ -629,6 +674,8 @@ class MainWindow(tk.Tk):
         self._switches = {
             "direct_mode": self._direct_toggle_switch,
             "scout_mode": self._scout_toggle_switch,
+            "logo_led": self._led_toggle_switch,
+            "energy_saving": self._energy_toggle_switch,
         }
         self._controller.add_listener("reconnecting", self._on_reconnecting)
 
@@ -661,7 +708,7 @@ class MainWindow(tk.Tk):
         if not self._controller:
             return
 
-        for feature in ("direct_mode", "scout_mode"):
+        for feature in ("direct_mode", "scout_mode", "logo_led", "energy_saving"):
             if not self._controller.is_feature_supported(feature):
                 self._unavailable.add(feature)
                 row = self._toggle_rows[feature]
@@ -700,6 +747,8 @@ class MainWindow(tk.Tk):
         # Load the states
         self._direct_mode_var.set(self._controller.get_direct_mode())
         self._scout_mode_var.set(self._controller.get_scout_mode())
+        self._logo_led_var.set(self._controller.get_logo_led())
+        self._energy_saving_var.set(self._controller.get_energy_saving())
         self._select_sound_mode(self._controller.get_sound_mode())
         self._update_eq_button_label()
         self._update_decoder_row_label()
@@ -737,22 +786,35 @@ class MainWindow(tk.Tk):
     # Navigation between pages (no floating window)
     # ------------------------------------------------------------------
 
-    def _show_page(self, page: tk.Frame, title_msgid: str, title_font: tuple) -> None:
+    def _show_page(
+        self,
+        page: tk.Frame,
+        title_msgid: str,
+        title_font: tuple,
+        sidebar_key: str = "devices",
+        show_back: bool = True,
+    ) -> None:
         """Shows one page of ``self._pages``, hiding the others.
 
-        The back button is shown on every page but the main one, and the
-        title is remembered as a msgid so ``_retranslate`` can re-render it
-        in the new language without knowing which page is up.
+        The back button is shown on every "Devices" sub-page (Equalizer,
+        CrystalVoice, Decoder) but not on "Devices" itself nor on other
+        top-level sidebar destinations (``show_back=False``, e.g. Settings),
+        which are left by clicking another sidebar entry instead. The title
+        is remembered as a msgid so ``_retranslate`` can re-render it in the
+        new language without knowing which page is up.
+
+        Deliberately does *not* resize the window: it's sized once, for all
+        pages at once, by ``_fit_window_to_content`` at startup - switching
+        pages must not change the window's size (the user can still resize
+        it by hand, that's untouched).
         """
         for other in self._pages:
             if other is not page:
                 other.pack_forget()
 
-        # Every page is reached from "Devices" (the other menu entries have no
-        # page yet), so it stays the selected one throughout.
-        self._sidebar.select("devices")
+        self._sidebar.select(sidebar_key)
 
-        if page is self._main_page:
+        if page is self._main_page or not show_back:
             self._back_button.place_forget()
         else:
             self._back_button.place(x=24, rely=0.5, anchor="w")
@@ -760,7 +822,6 @@ class MainWindow(tk.Tk):
         self._current_title = (title_msgid, title_font)
         self._title_label.config(text=i18n._(title_msgid), font=title_font)
         page.pack(expand=True, fill=tk.BOTH)
-        self._fit_window_to_page()
 
     def _show_main_page(self):
         """Shows the main page (hides the back button)."""
@@ -769,13 +830,14 @@ class MainWindow(tk.Tk):
         self._update_decoder_row_label()
         self._show_page(self._main_page, "Sound Blaster G8", theme.FONT_TITLE)
 
-    # Panels are built on first navigation rather than at startup: they
-    # account for ~1.5 MB of widgets, and most launches only ever use the
-    # main page. Each builder must run *before* _show_page, which sizes the
-    # window from the displayed page's requested geometry.
+    # The three panels are built eagerly in _setup_ui (not lazily on first
+    # navigation anymore): _fit_window_to_content needs every page's real
+    # content in place to size the window once, for good, at startup. Each
+    # ``_ensure_*`` is idempotent, so calling them again on navigation (kept
+    # below, in case a panel ever becomes lazy again) is a no-op.
 
     def _ensure_eq_panel(self):
-        """Builds the Equalizer panel on first use."""
+        """Builds the Equalizer panel (no-op if already built)."""
         if self._eq_panel is None and self._controller is not None:
             self._eq_panel = EQPanel(
                 self._eq_page, self._controller,
@@ -784,7 +846,7 @@ class MainWindow(tk.Tk):
             self._eq_panel.pack(fill=tk.BOTH, expand=True)
 
     def _ensure_cv_panel(self):
-        """Builds the CrystalVoice panel on first use."""
+        """Builds the CrystalVoice panel (no-op if already built)."""
         if self._cv_panel is None and self._controller is not None:
             self._cv_panel = CrystalVoicePanel(
                 self._cv_page, self._controller,
@@ -793,7 +855,7 @@ class MainWindow(tk.Tk):
             self._cv_panel.pack(fill=tk.BOTH, expand=True)
 
     def _ensure_decoder_panel(self):
-        """Builds the Decoder panel on first use."""
+        """Builds the Decoder panel (no-op if already built)."""
         if self._decoder_panel is None and self._controller is not None:
             self._decoder_panel = DecoderPanel(
                 self._decoder_page, self._controller,
@@ -820,6 +882,13 @@ class MainWindow(tk.Tk):
         self._show_page(self._decoder_page, "Decoder", theme.FONT_TITLE_EQ)
         if self._decoder_panel is not None:
             self._decoder_panel.refresh()
+
+    def _show_settings_page(self):
+        """Shows the Settings page (top-level sidebar destination, no back button)."""
+        self._show_page(
+            self._settings_page, "Settings", theme.FONT_TITLE_EQ,
+            sidebar_key="settings", show_back=False,
+        )
 
     def _prepare_eq_page_async(self):
         """Prepares the equalizer (enables + applies a flat state if needed).
@@ -849,12 +918,28 @@ class MainWindow(tk.Tk):
 
         self._controller.submit(worker)
 
-    def _fit_window_to_page(self):
-        """Resizes the window so the displayed page fits entirely."""
-        self.update_idletasks()
-        width = max(MIN_WINDOW_WIDTH, self.winfo_reqwidth())
-        height = self.winfo_reqheight()
-        self.geometry(f"{width}x{height}")
+    def _fit_window_to_content(self) -> None:
+        """Sizes the window once so it fits the largest of all pages.
+
+        Called only from ``_setup_ui``, after every page (including the
+        Equalizer/CrystalVoice/Decoder panels, eagerly built for this) has
+        its real content built. Each page is packed in turn just long enough
+        to measure the window's resulting requested size - none of this is
+        visible, since it all happens before the window is first mapped on
+        screen - then the geometry is fixed to the largest width/height
+        found. Unlike the old per-page ``_fit_window_to_page``, navigating
+        between pages afterwards never resizes the window again; the window
+        remains user-resizable (``resizable(True, True)``, set in __init__).
+        """
+        max_width = MIN_WINDOW_WIDTH
+        max_height = 0
+        for page in self._pages:
+            page.pack(expand=True, fill=tk.BOTH)
+            self.update_idletasks()
+            max_width = max(max_width, self.winfo_reqwidth())
+            max_height = max(max_height, self.winfo_reqheight())
+            page.pack_forget()
+        self.geometry(f"{max_width}x{max_height}")
 
     def _set_status(self, template: str, **kwargs) -> None:
         """Single choke point for status-bar text: stores (template, kwargs) so
@@ -984,6 +1069,22 @@ class MainWindow(tk.Tk):
             "scout_mode", i18n._("Scout Mode"), self._scout_mode_var,
             lambda v: self._controller.set_scout_mode(v),
             getter=lambda: self._controller.get_scout_mode(),
+        )
+
+    def _on_logo_led_change(self):
+        """Handles a Logo LED change."""
+        self._handle_toggle(
+            "logo_led", i18n._("Logo LED"), self._logo_led_var,
+            lambda v: self._controller.set_logo_led(v),
+            getter=lambda: self._controller.get_logo_led(),
+        )
+
+    def _on_energy_saving_change(self):
+        """Handles an Energy Saving change."""
+        self._handle_toggle(
+            "energy_saving", i18n._("Power Saving"), self._energy_saving_var,
+            lambda v: self._controller.set_energy_saving(v),
+            getter=lambda: self._controller.get_energy_saving(),
         )
 
     def _on_sound_mode_change(self, index: int):

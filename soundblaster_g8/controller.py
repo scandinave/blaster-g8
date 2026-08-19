@@ -23,7 +23,10 @@ from .sound_modes import DEFAULT_SOUND_MODE, SOUND_MODES
 
 #: Features whose USB frame has been identified and validated on hardware.
 SUPPORTED_FEATURES = frozenset(
-    {"scout_mode", "direct_mode", "sound_mode", "eq", "crystalvoice", "decoder"}
+    {
+        "scout_mode", "direct_mode", "sound_mode", "eq", "crystalvoice", "decoder",
+        "logo_led", "energy_saving",
+    }
 )
 
 #: Dolby Digital decoder modes, as ``(slug, label, written f32 value)``, in
@@ -120,6 +123,8 @@ class SoundBlasterController:
         self._driver = driver if driver else get_driver()
         self._direct_mode = False
         self._scout_mode = False
+        self._logo_led = False
+        self._energy_saving = False
         self._cv_noise_reduction = False
         self._cv_noise_reduction_level = 0.0
         self._cv_echo_cancellation = False
@@ -143,6 +148,8 @@ class SoundBlasterController:
         self._listeners: dict[str, list[Callable]] = {
             "direct_mode_changed": [],
             "scout_mode_changed": [],
+            "logo_led_changed": [],
+            "energy_saving_changed": [],
             "crystalvoice_noise_reduction_changed": [],
             "crystalvoice_noise_reduction_level_changed": [],
             "crystalvoice_echo_cancellation_changed": [],
@@ -229,6 +236,8 @@ class SoundBlasterController:
         for name, getter in (
             ("_direct_mode", self._driver.get_direct_mode),
             ("_scout_mode", self._driver.get_scout_mode),
+            ("_logo_led", self._driver.get_logo_led),
+            ("_energy_saving", self._driver.get_energy_saving),
             ("_cv_noise_reduction", self._driver.get_crystalvoice_noise_reduction),
             ("_cv_echo_cancellation", self._driver.get_crystalvoice_echo_cancellation),
             ("_cv_smart_volume", self._driver.get_crystalvoice_smart_volume),
@@ -304,6 +313,56 @@ class SoundBlasterController:
         if state is not None:
             self._scout_mode = state
         return self._scout_mode
+
+    # ------------------------------------------------------------------
+    # Logo LED (supported)
+    # ------------------------------------------------------------------
+
+    def set_logo_led(self, enabled: bool) -> bool:
+        """Enables/disables the Logo LED.
+
+        Returns:
+            ``True`` if the card confirmed the command.
+        """
+        ok = bool(self._driver.set_logo_led(enabled))
+        if ok:
+            self._logo_led = enabled
+            self._notify("logo_led_changed", enabled)
+        else:
+            self._notify("command_failed", "logo_led", enabled)
+        return ok
+
+    def get_logo_led(self) -> bool:
+        """Returns the Logo LED's known state."""
+        state = self._driver.get_logo_led()
+        if state is not None:
+            self._logo_led = state
+        return self._logo_led
+
+    # ------------------------------------------------------------------
+    # Energy Saving (supported)
+    # ------------------------------------------------------------------
+
+    def set_energy_saving(self, enabled: bool) -> bool:
+        """Enables/disables Energy Saving.
+
+        Returns:
+            ``True`` if the card confirmed the command.
+        """
+        ok = bool(self._driver.set_energy_saving(enabled))
+        if ok:
+            self._energy_saving = enabled
+            self._notify("energy_saving_changed", enabled)
+        else:
+            self._notify("command_failed", "energy_saving", enabled)
+        return ok
+
+    def get_energy_saving(self) -> bool:
+        """Returns Energy Saving's known state."""
+        state = self._driver.get_energy_saving()
+        if state is not None:
+            self._energy_saving = state
+        return self._energy_saving
 
     # ------------------------------------------------------------------
     # Direct Mode (supported)

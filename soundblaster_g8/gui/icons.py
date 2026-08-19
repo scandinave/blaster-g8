@@ -46,6 +46,8 @@ BOOTSTRAP_NAMES = {
     "settings": "gear-fill",
     "speaker": "volume-up-fill",
     "microphone": "mic-fill",
+    "led": "lightbulb-fill",
+    "energy_saving": "leaf-fill",
 }
 
 #: (name, size, colour) -> PhotoImage.

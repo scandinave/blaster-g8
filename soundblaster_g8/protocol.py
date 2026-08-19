@@ -34,6 +34,10 @@ the report is padded with zeros up to 64 bytes (:func:`pad_report`):
     Scout OFF   : 5a 26 05 07 02 00 00 00  + 56 zeros
     Direct ON   : 5a 39 03 00 05 01        + 58 zeros
     Direct OFF  : 5a 39 03 00 05 00        + 58 zeros
+    LED ON      : 5a 39 03 00 0e 01        + 58 zeros
+    LED OFF     : 5a 39 03 00 0e 00        + 58 zeros
+    Energy ON   : 5a 39 03 00 11 01        + 58 zeros
+    Energy OFF  : 5a 39 03 00 11 00        + 58 zeros
 
 On the Python side, ``hid_write()`` consumes the **first byte as the report
 ID**: so we write ``b"\\x00" + pad_report(frame)`` (65 bytes) to get
@@ -62,6 +66,8 @@ Card -> host direction
 
     5a 02 0a 26 00 07 02 00 01 00 ...   -> ACK of command 0x26, status 0x00
     5a 02 0a 39 00 05 00 ...            -> ACK of command 0x39, status 0x00
+    5a 02 0a 39 00 0e 01 ...            -> ACK of the Logo LED toggle
+    5a 02 0a 39 00 11 01 ...            -> ACK of the Energy Saving toggle
     5a 39 05 01 00 40 00 00 ...         -> Direct Mode state response
     5a 1a ...                           -> "a setting changed" notification
     5a 11 0e 02 00 96 00 <f32> ...      -> parameter dump
@@ -117,6 +123,16 @@ Payload of a Direct Mode command / response (type 0x39)
     write : <feature 0x00> <param 0x05> <value 0/1>
     read  : request  01 20 00 00 00
             response 01 00 40 00 00   -> bit 0x20 of payload[1] = enabled
+
+The 0x39 frame is actually a generic boolean-toggle command, not specific
+to Direct Mode: the "LogoLed" and "energy-saving" captures show the exact
+same ``<feature 0x00> <param> <value>`` write, with ``param = 0x0e`` (Logo
+LED) and ``param = 0x11`` (Energy Saving) respectively, ACK'd the same way
+(:func:`build_toggle_command`). Unlike Direct Mode, neither toggle triggers
+a USB reset (14 USB frames total per capture, no disconnect/reconnect
+burst), and no read/status frame was observed for either - same situation
+as Scout Mode: :meth:`driver.SoundBlasterG8Driver.get_logo_led` and
+``get_energy_saving`` rely on the cached ACK, like ``get_scout_mode``.
 
 Payload of a parameter dump (type 0x11)
 -------------------------------------------
@@ -253,6 +269,12 @@ SCOUT_MODE = (FEATURE_SCOUT, PARAM_SCOUT_ENABLED)
 # Direct Mode - identifiers extracted from the USB captures
 FEATURE_DIRECT_MODE = 0x00
 PARAM_DIRECT_MODE = 0x05
+
+# Logo LED / Energy Saving - same 0x39 frame family as Direct Mode (feature
+# byte 0x00, no USB reset), identifiers extracted from the "LogoLed" and
+# "energy-saving" USB captures.
+PARAM_LOGO_LED = 0x0E
+PARAM_ENERGY_SAVING = 0x11
 
 # Sound mode / equalizer - parameter identifiers extracted from the "Sound
 # Mode" captures (CMD_SET_FLOAT command, type 0x12).
@@ -535,6 +557,20 @@ def build_scout_mode(enabled: bool) -> bytes:
     return build_set_bool(*SCOUT_MODE, enabled)
 
 
+def build_toggle_command(param: int, enabled: bool) -> bytes:
+    """Generic type-0x39 boolean toggle: ``<feature 0x00> <param> <value>``.
+
+    Direct Mode, the Logo LED and Energy Saving share this exact frame
+    shape - only Direct Mode additionally triggers a USB reset (see
+    ``driver.set_direct_mode``).
+
+    >>> build_toggle_command(PARAM_LOGO_LED, True).hex()
+    '5a3903000e01'
+    """
+    payload = bytes([FEATURE_DIRECT_MODE, param, 1 if enabled else 0])
+    return build_frame(CMD_DIRECT_MODE, payload)
+
+
 def build_direct_mode(enabled: bool) -> bytes:
     """Direct Mode on/off frame (unpadded).
 
@@ -543,8 +579,29 @@ def build_direct_mode(enabled: bool) -> bytes:
     >>> build_direct_mode(False).hex()
     '5a3903000500'
     """
-    payload = bytes([FEATURE_DIRECT_MODE, PARAM_DIRECT_MODE, 1 if enabled else 0])
-    return build_frame(CMD_DIRECT_MODE, payload)
+    return build_toggle_command(PARAM_DIRECT_MODE, enabled)
+
+
+def build_logo_led(enabled: bool) -> bytes:
+    """Logo LED on/off frame (unpadded).
+
+    >>> build_logo_led(True).hex()
+    '5a3903000e01'
+    >>> build_logo_led(False).hex()
+    '5a3903000e00'
+    """
+    return build_toggle_command(PARAM_LOGO_LED, enabled)
+
+
+def build_energy_saving(enabled: bool) -> bytes:
+    """Energy Saving on/off frame (unpadded).
+
+    >>> build_energy_saving(True).hex()
+    '5a3903001101'
+    >>> build_energy_saving(False).hex()
+    '5a3903001100'
+    """
+    return build_toggle_command(PARAM_ENERGY_SAVING, enabled)
 
 
 def build_set_float(param: int, value: float, marker: int = TLV_FLOAT) -> bytes:

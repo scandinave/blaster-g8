@@ -52,6 +52,18 @@ msgstr "Scout Mode"
 msgid "In-game sound detection"
 msgstr "Détection des sons dans le jeu"
 
+msgid "Logo LED"
+msgstr "LED du logo"
+
+msgid "Illuminates the G8's logo"
+msgstr "Illumine le logo du G8"
+
+msgid "Power Saving"
+msgstr "Économie d'énergie"
+
+msgid "Reduces power use when idle"
+msgstr "Réduit la consommation au repos"
+
 msgid "CrystalVoice"
 msgstr "CrystalVoice"
 

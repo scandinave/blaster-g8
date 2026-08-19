@@ -28,6 +28,13 @@ reconnection after the USB reset)::
 
     python tools/g8_probe.py --reconnect-test 5
 
+Enable / disable the Logo LED / Energy Saving (no USB reset)::
+
+    python tools/g8_probe.py --led on --debug
+    python tools/g8_probe.py --led off
+    python tools/g8_probe.py --energy-saving on --debug
+    python tools/g8_probe.py --energy-saving off
+
 Listen to the card's notifications (useful while operating the official
 Creative application, to discover new parameters)::
 
@@ -129,6 +136,24 @@ def cmd_scout(driver: SoundBlasterG8Driver, value: str) -> int:
     print()
     print(f"Result: {'SUCCESS' if ok else 'FAILURE'}")
     print(f"Known Scout Mode state: {driver.get_scout_mode()}")
+    return 0 if ok else 1
+
+
+def cmd_led(driver: SoundBlasterG8Driver, value: str) -> int:
+    enabled = _truthy(value)
+    ok = driver.set_logo_led(enabled)
+    print()
+    print(f"Result: {'SUCCESS' if ok else 'FAILURE'}")
+    print(f"Known Logo LED state: {driver.get_logo_led()}")
+    return 0 if ok else 1
+
+
+def cmd_energy_saving(driver: SoundBlasterG8Driver, value: str) -> int:
+    enabled = _truthy(value)
+    ok = driver.set_energy_saving(enabled)
+    print()
+    print(f"Result: {'SUCCESS' if ok else 'FAILURE'}")
+    print(f"Known Energy Saving state: {driver.get_energy_saving()}")
     return 0 if ok else 1
 
 
@@ -283,6 +308,10 @@ def cmd_selftest() -> int:
     ok &= _check("Direct OFF", protocol.build_direct_mode(False).hex(), "5a3903000500")
     ok &= _check("Direct status (req)",
                  protocol.build_direct_mode_status().hex(), "5a39050120000000")
+    ok &= _check("Logo LED ON", protocol.build_logo_led(True).hex(), "5a3903000e01")
+    ok &= _check("Logo LED OFF", protocol.build_logo_led(False).hex(), "5a3903000e00")
+    ok &= _check("Energy Saving ON", protocol.build_energy_saving(True).hex(), "5a3903001101")
+    ok &= _check("Energy Saving OFF", protocol.build_energy_saving(False).hex(), "5a3903001100")
     ok &= _check("Info probe", protocol.build_info_probe().hex(), "5a090102")
     ok &= _check(
         "SET_FLOAT (EQ on)",
@@ -338,6 +367,24 @@ def cmd_selftest() -> int:
         ok &= _check("  ACK 0x39 param", ack_dm.dm_ack_param, protocol.PARAM_DIRECT_MODE)
         ok &= _check("  ACK 0x39 value", ack_dm.dm_ack_value, 0)
 
+    ack_led = protocol.parse_frame(bytes.fromhex("5a020a39000e01" + "00" * 57))
+    if ack_led is None:
+        print("ACK 0x39 (Logo LED)         : decoding FAILED")
+        ok = False
+    else:
+        print(f"Decoded ACK 0x39 (Logo LED) : {ack_led.describe()}")
+        ok &= _check("  ACK 0x39 param", ack_led.dm_ack_param, protocol.PARAM_LOGO_LED)
+        ok &= _check("  ACK 0x39 value", ack_led.dm_ack_value, 1)
+
+    ack_energy = protocol.parse_frame(bytes.fromhex("5a020a39001101" + "00" * 57))
+    if ack_energy is None:
+        print("ACK 0x39 (Energy Saving)    : decoding FAILED")
+        ok = False
+    else:
+        print(f"Decoded ACK 0x39 (Energy)   : {ack_energy.describe()}")
+        ok &= _check("  ACK 0x39 param", ack_energy.dm_ack_param, protocol.PARAM_ENERGY_SAVING)
+        ok &= _check("  ACK 0x39 value", ack_energy.dm_ack_value, 1)
+
     status_off = protocol.parse_frame(bytes.fromhex("5a3905010040000000" + "00" * 55))
     if status_off is None:
         print("0x39 status response         : decoding FAILED")
@@ -377,6 +424,8 @@ def main() -> int:
     parser.add_argument("--list", action="store_true", help="list the HID interfaces")
     parser.add_argument("--scout", metavar="on|off", help="enable/disable Scout Mode")
     parser.add_argument("--direct", metavar="on|off", help="enable/disable Direct Mode")
+    parser.add_argument("--led", metavar="on|off", help="enable/disable the Logo LED")
+    parser.add_argument("--energy-saving", metavar="on|off", help="enable/disable Energy Saving")
     parser.add_argument("--direct-status", action="store_true",
                         help="read Direct Mode's state from the card")
     parser.add_argument("--reconnect-test", type=int, metavar="N",
@@ -409,6 +458,7 @@ def main() -> int:
 
     needs_hardware = (
         args.scout or args.direct or args.direct_status
+        or args.led or args.energy_saving
         or args.reconnect_test or args.set or args.raw or args.monitor
         or args.sound_mode
     )
@@ -430,6 +480,10 @@ def main() -> int:
             return cmd_direct(driver, args.direct)
         if args.direct_status:
             return cmd_direct_status(driver)
+        if args.led:
+            return cmd_led(driver, args.led)
+        if args.energy_saving:
+            return cmd_energy_saving(driver, args.energy_saving)
         if args.reconnect_test:
             return cmd_reconnect_test(driver, args.reconnect_test)
         if args.set:
