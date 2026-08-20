@@ -371,12 +371,6 @@ msgstr "{label} : échec de « {mode} » (voir la console)"
 msgid "Devices"
 msgstr "Périphériques"
 
-msgid "Playback"
-msgstr "Lecture"
-
-msgid "Recording"
-msgstr "Enregistrement"
-
 msgid "Settings"
 msgstr "Paramètres"
 

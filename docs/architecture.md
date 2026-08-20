@@ -13,9 +13,8 @@ runtime. The `.svg` under `assets/bootstrap-icons/` are build sources:
 tints on the fly to match each widget's state. Only regenerating them needs
 `cairosvg` (`pip install -e '.[build]'`).
 
-A sidebar on the left holds the application's menu — only **Devices**
-(the card's controls) is implemented so far, *Playback*, *Recording* and
-*Settings* are shown greyed out — and, at its foot, two sliders for the
+A sidebar on the left holds the application's menu — **Devices** (the
+card's controls) and **Settings** — and, at its foot, two sliders for the
 PC's own output and microphone volume. Those two act on the system's
 default devices (via `pactl` on Linux, `osascript` on macOS), not on the
 card's registers, and follow changes made elsewhere in the desktop.

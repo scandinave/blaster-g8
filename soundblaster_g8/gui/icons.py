@@ -41,8 +41,6 @@ BOOTSTRAP_NAMES = {
     "decoder": "activity",
     "reset": "arrow-counterclockwise",
     "device": "pci-card-sound",
-    "playback": "play-fill",
-    "recording": "record-circle",
     "settings": "gear-fill",
     "speaker": "volume-up-fill",
     "microphone": "mic-fill",

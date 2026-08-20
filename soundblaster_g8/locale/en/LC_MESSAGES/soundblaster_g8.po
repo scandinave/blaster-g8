@@ -371,12 +371,6 @@ msgstr "{label}: \"{mode}\" failed (see console)"
 msgid "Devices"
 msgstr "Devices"
 
-msgid "Playback"
-msgstr "Playback"
-
-msgid "Recording"
-msgstr "Recording"
-
 msgid "Settings"
 msgstr "Settings"
 

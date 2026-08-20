@@ -485,11 +485,7 @@ class MainWindow(tk.Tk):
     # ------------------------------------------------------------------
 
     def _on_sidebar_select(self, key: str) -> None:
-        """Handles a click on an enabled sidebar entry.
-
-        Only "Devices" and "Settings" exist so far; "Playback" and
-        "Recording" are built disabled and never reach this method.
-        """
+        """Handles a click on a sidebar entry."""
         if key == "devices":
             self._show_main_page()
         elif key == "settings":
