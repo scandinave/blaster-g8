@@ -79,6 +79,12 @@ msgstr "Égaliseur et acoustic engine"
 msgid "(not implemented)"
 msgstr "(non implémenté)"
 
+msgid "Connecting to the Sound Blaster G8…"
+msgstr "Connexion à la Sound Blaster G8…"
+
+msgid "Connection error ({error})"
+msgstr "Erreur de connexion ({error})"
+
 msgid "Connected to Sound Blaster G8 (interface {interface})"
 msgstr "Connecté à Sound Blaster G8 (interface {interface})"
 

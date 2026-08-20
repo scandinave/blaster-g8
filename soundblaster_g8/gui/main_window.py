@@ -496,21 +496,46 @@ class MainWindow(tk.Tk):
             self._show_settings_page()
 
     def _init_system_volume(self) -> None:
-        """Fills the sidebar sliders and starts watching for outside changes."""
-        if not system_volume.available():
-            self._sidebar.set_output_enabled(False)
-            self._sidebar.set_input_enabled(False)
+        """Probes the volume backend off the Tk thread, then fills the sliders.
+
+        ``system_volume.available()`` shells out to ``pactl info`` (or
+        ``osascript``), and the first read is two more subprocesses: on the Tk
+        thread that is up to three command timeouts before the window responds.
+        The sliders start disabled and light up when the probe comes back.
+
+        The ``<Destroy>`` binding is set up here unconditionally - it is what
+        stops the watcher and closes the HID handle on exit, and it used to be
+        skipped entirely on a machine with no volume backend.
+        """
+        self.bind("<Destroy>", self._on_destroy, add="+")
+        self._set_volume_sliders_enabled(False)
+
+        def worker():
+            usable = system_volume.available()
+            readings = {
+                kind: system_volume.get_volume(kind)
+                for kind in (system_volume.OUTPUT, system_volume.INPUT)
+            } if usable else {}
+            self._post(lambda: self._finish_system_volume(usable, readings))
+
+        self._controller.submit(worker)
+
+    def _finish_system_volume(
+        self, usable: bool, readings: dict[str, Optional[tuple[int, bool]]],
+    ) -> None:
+        """End of the volume probe (Tk thread): show the values, start watching."""
+        if not usable:
             self._sidebar.set_output_volume(None)
             self._sidebar.set_input_volume(None)
             self._set_status("System volume control unavailable")
             return
 
-        self._refresh_volumes()
+        self._show_volumes(readings)
+        self._set_volume_sliders_enabled(True)
         # The callback fires on the watcher's thread: hop back to Tk's.
         self._volume_watcher = system_volume.start_watch(
             lambda: self._post(self._refresh_volumes)
         )
-        self.bind("<Destroy>", self._on_destroy, add="+")
 
     def _on_destroy(self, event=None) -> None:
         """Stops the volume watcher when the window itself goes away.
@@ -553,12 +578,9 @@ class MainWindow(tk.Tk):
             }
             self._post(lambda: self._show_volumes(readings))
 
-        if self._controller is None:
-            self._show_volumes({
-                kind: system_volume.get_volume(kind)
-                for kind in (system_volume.OUTPUT, system_volume.INPUT)
-            })
-        else:
+        # The controller exists from _init_controller onwards, i.e. before
+        # anything can call this: no synchronous fallback to fall back to.
+        if self._controller is not None:
             self._controller.submit(worker)
 
     def _show_volumes(self, readings: dict[str, Optional[tuple[int, bool]]]) -> None:
@@ -722,17 +744,63 @@ class MainWindow(tk.Tk):
         # _ensure_eq_panel & co.), not here: they cost ~1.5 MB of widgets
         # for pages most launches never open.
 
-        if self._controller.connect():
-            info = self._controller.get_debug_info()
+        # Feature availability is a static table lookup, no I/O: it can stay
+        # here, and it has to - the greyed-out rows change their requested size
+        # and _fit_window_to_content measures right after.
+        self._apply_feature_availability()
+
+        # The connection is not. It runs amixer, enumerates USB, opens the HID
+        # interface and reads Direct Mode back from the card - and if the card
+        # is mid-re-enumeration that last read drags a full reconnect (up to
+        # RECONNECT_TIMEOUT_S) behind it. On the Tk thread that is a window
+        # that takes seconds to appear with nothing on screen to explain it.
+        self._set_status("Connecting to the Sound Blaster G8…")
+        self._controller.submit(self._connect_job)
+
+    def _connect_job(self) -> None:
+        """Worker thread: connect, then read back everything the UI displays.
+
+        The reads happen here rather than in :meth:`_finish_connect` because
+        several of them go to the card (``get_direct_mode`` is a real
+        round-trip): the Tk thread only ever sees the resulting values.
+        """
+        error: Optional[Exception] = None
+        connected = False
+        interface = None
+        state: dict = {}
+        try:
+            connected = bool(self._controller.connect())
+            if connected:
+                interface = self._controller.get_debug_info().get("interface_number")
+                state = {
+                    "direct_mode": self._controller.get_direct_mode(),
+                    "scout_mode": self._controller.get_scout_mode(),
+                    "logo_led": self._controller.get_logo_led(),
+                    "energy_saving": self._controller.get_energy_saving(),
+                }
+        except Exception as exc:  # pragma: no cover - depends on hardware
+            error = exc
+        self._post(lambda: self._finish_connect(connected, interface, state, error))
+
+    def _finish_connect(
+        self,
+        connected: bool,
+        interface: Optional[int],
+        state: dict,
+        error: Optional[Exception],
+    ) -> None:
+        """End of the startup connection (Tk thread): show the real state."""
+        if error is not None:
+            self._set_status("Connection error ({error})", error=error)
+        elif connected:
             self._set_status(
                 "Connected to Sound Blaster G8 (interface {interface})",
-                interface=info.get("interface_number"),
+                interface=interface,
             )
-            self._load_current_state()
         else:
             self._set_status("No hardware detected - commands will have no effect")
 
-        self._apply_feature_availability()
+        self._apply_hardware_state(state)
 
     def _apply_feature_availability(self):
         """Greys out controls whose USB frame hasn't been reverse-engineered yet."""
@@ -770,19 +838,34 @@ class MainWindow(tk.Tk):
             self._unavailable.add("decoder")
             self._set_decoder_nav_enabled(False)
 
-    def _load_current_state(self):
-        """Loads the current state from the controller."""
+    def _apply_hardware_state(self, state: dict) -> None:
+        """Applies the states read by :meth:`_connect_job` (Tk thread only).
+
+        Takes the values as an argument rather than re-reading them from the
+        controller: the getters talk to the card, and this runs on the Tk
+        thread. Everything below that *is* re-read - sound mode, decoder mode,
+        the panels - comes from the controller's local cache, which
+        ``connect()`` has just refreshed.
+        """
         if not self._controller:
             return
 
-        # Load the states
-        self._direct_mode_var.set(self._controller.get_direct_mode())
-        self._scout_mode_var.set(self._controller.get_scout_mode())
-        self._logo_led_var.set(self._controller.get_logo_led())
-        self._energy_saving_var.set(self._controller.get_energy_saving())
+        for key, var in (
+            ("direct_mode", self._direct_mode_var),
+            ("scout_mode", self._scout_mode_var),
+            ("logo_led", self._logo_led_var),
+            ("energy_saving", self._energy_saving_var),
+        ):
+            if state.get(key) is not None:
+                var.set(bool(state[key]))
+
         self._select_sound_mode(self._controller.get_sound_mode())
         self._update_eq_button_label()
         self._update_decoder_row_label()
+
+        for panel in (self._eq_panel, self._cv_panel, self._decoder_panel):
+            if panel is not None:
+                panel.refresh()
 
     def _select_sound_mode(self, slug: str) -> None:
         """Sets the SplitSelect to the given sound mode (without firing the event)."""
