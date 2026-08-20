@@ -4,7 +4,8 @@ set -e
 if [ "$1" = "configure" ]; then
     if command -v udevadm >/dev/null 2>&1; then
         udevadm control --reload-rules || true
-        udevadm trigger --subsystem-match=usb --action=add || true
+        udevadm trigger --subsystem-match=usb --action=add \
+            --attr-match=idVendor=041e --attr-match=idProduct=329b || true
     fi
     if command -v update-desktop-database >/dev/null 2>&1; then
         update-desktop-database -q /usr/share/applications || true

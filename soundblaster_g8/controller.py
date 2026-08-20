@@ -770,6 +770,10 @@ class SoundBlasterController:
         """Loads a predefined preset.
 
         Available presets: flat, bass_boost, vocal, gaming, movie.
+
+        Like :meth:`set_sound_mode`, a preset fully replaces the 10 bands, so
+        the Bass/Treble slider positions - a delta from a base that no longer
+        exists - are reset with them.
         """
         presets = {
             "flat": [0.0] * self.NUM_BANDS,
@@ -787,7 +791,13 @@ class SoundBlasterController:
             self._eq_bands[i] = value
             if not self._driver.eq_set_band(i, value):
                 all_ok = False
-        self._notify("eq_all_bands_changed", presets[preset_name])
+        self._eq_bass = 0.0
+        self._eq_treble = 0.0
+        self._notify("eq_all_bands_changed", self._eq_bands.copy())
+        self._notify("eq_bass_changed", 0.0)
+        self._notify("eq_treble_changed", 0.0)
+        if not all_ok:
+            self._notify("command_failed", "eq_preset", preset_name)
         return all_ok
 
     def save_preset(self, preset_name: str) -> bool:
@@ -799,8 +809,18 @@ class SoundBlasterController:
     # ------------------------------------------------------------------
 
     def add_listener(self, event: str, callback: Callable) -> None:
-        if event in self._listeners:
-            self._listeners[event].append(callback)
+        """Registers ``callback`` for ``event``.
+
+        Raises ``ValueError`` on an unknown event name: silently dropping the
+        registration turns a typo into a callback that never fires, with
+        nothing to show for it.
+        """
+        if event not in self._listeners:
+            raise ValueError(
+                f"Unknown event {event!r}; known events: "
+                f"{', '.join(sorted(self._listeners))}"
+            )
+        self._listeners[event].append(callback)
 
     def remove_listener(self, event: str, callback: Callable) -> None:
         if event in self._listeners and callback in self._listeners[event]:

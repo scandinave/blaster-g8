@@ -13,7 +13,12 @@ set -e
 
 SCRIPT_SRC="soundblaster-g8-alsa-fix.sh"
 RULES_SRC="95-soundblaster-g8-alsa.rules"
-SCRIPT_DEST="/usr/local/bin/soundblaster-g8-alsa-fix.sh"
+# Own directory rather than a shared /usr/local/bin: this script is executed
+# as root by udev on every plug, so its integrity must not depend on the
+# permissions /usr/local/bin happens to carry (some setups make it
+# group-writable). The directory is created explicitly root:root 0755 below.
+SCRIPT_DIR_DEST="/usr/local/lib/soundblaster-g8"
+SCRIPT_DEST="$SCRIPT_DIR_DEST/soundblaster-g8-alsa-fix.sh"
 RULES_DEST="/etc/udev/rules.d/95-soundblaster-g8-alsa.rules"
 
 # Step 3 is opt-in because it shadows a file owned by alsa-utils. Marker line
@@ -61,6 +66,7 @@ do_install() {
     echo "Installing Sound Blaster G8 ALSA fix..."
 
     # Install the fix script
+    install -d -o root -g root -m 755 "$SCRIPT_DIR_DEST"
     install -m 755 "$SCRIPT_DIR/$SCRIPT_SRC" "$SCRIPT_DEST"
     echo "  ✓ Installed $SCRIPT_DEST"
 
@@ -153,6 +159,9 @@ uninstall() {
     echo "Uninstalling Sound Blaster G8 ALSA fix..."
 
     [ -f "$SCRIPT_DEST" ] && rm -f "$SCRIPT_DEST" && echo "  ✓ Removed $SCRIPT_DEST"
+    # Fails harmlessly if anything else was put there.
+    [ -d "$SCRIPT_DIR_DEST" ] && rmdir "$SCRIPT_DIR_DEST" 2>/dev/null \
+        && echo "  ✓ Removed $SCRIPT_DIR_DEST"
     [ -f "$RULES_DEST" ] && rm -f "$RULES_DEST" && echo "  ✓ Removed $RULES_DEST"
 
     # Only remove the alsa-restore override if it is the one we installed:

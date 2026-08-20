@@ -165,7 +165,7 @@ class DecoderPanel(tk.Frame):
                 ok = bool(self.controller.set_decoder_mode(slug))
             except Exception as exc:  # pragma: no cover - depends on hardware
                 error = exc
-            self.after(0, lambda: self._finish_mode_change(label, mode, ok, error))
+            widgets.post_to_ui(self, lambda: self._finish_mode_change(label, mode, ok, error))
 
         self.controller.submit(worker)
 

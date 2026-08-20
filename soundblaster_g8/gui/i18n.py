@@ -69,8 +69,22 @@ def get_language() -> str:
     return _current_language
 
 
+def is_available(lang: str) -> bool:
+    """Whether ``lang`` is one of the compiled catalogs under ``locale/``.
+
+    Every language code that reaches :func:`gettext.translation` has to pass
+    through here first: gettext joins the code into a filesystem path, so an
+    unchecked value read back from settings.json (``../..``) would load a
+    catalog from outside ``locale/``.
+    """
+    return any(code == lang for code, _name in available_languages())
+
+
 def set_language(lang: str) -> None:
     global _current_language
+    if not is_available(lang):
+        print(f"[i18n] Unknown language {lang!r}: keeping {_current_language!r}")
+        return
     _current_language = lang
     _save_language(lang)
     for listener in list(_listeners):
@@ -95,7 +109,7 @@ def load_saved_language() -> str:
     try:
         data = json.loads(_settings_path().read_text(encoding="utf-8"))
         saved = data.get("language")
-        if isinstance(saved, str) and saved:
+        if isinstance(saved, str) and is_available(saved):
             lang = saved
     except (OSError, ValueError):
         pass

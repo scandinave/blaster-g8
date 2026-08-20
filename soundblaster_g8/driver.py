@@ -159,14 +159,18 @@ class SoundBlasterG8Driver:
            always 0 in ``hid_enumerate``). So this isn't a degraded case
            but the usual path for ``pip install hidapi`` wheels.
         3. ``input_report_length == 64``: last resort, since the Consumer
-           interface uses 16-byte reports.
+           interface uses 16-byte reports. Skipped when ``serial_number`` was
+           given but matched nothing - report length says nothing about
+           *which* card an interface belongs to.
         """
         candidates = interfaces
+        filtered_by_serial = False
         # Multiple cards plugged in: stick with the one already opened.
         if serial_number:
             same_card = [i for i in interfaces if i.get("serial_number") == serial_number]
             if same_card:
                 candidates = same_card
+                filtered_by_serial = True
 
         for info in candidates:
             if info.get("usage_page") == CONTROL_USAGE_PAGE:
@@ -174,8 +178,20 @@ class SoundBlasterG8Driver:
         for info in candidates:
             if info.get("interface_number") == CONTROL_INTERFACE_NUMBER:
                 return info
+
+        # Last resort. Skipped when a serial number was asked for but matched
+        # nothing: report length alone doesn't identify a card, so this would
+        # happily hand back the control interface of a *different* G8.
+        if serial_number and not filtered_by_serial:
+            return None
         for info in candidates:
             if info.get("input_report_length") == INPUT_REPORT_SIZE:
+                _log(
+                    "control interface identified by report length alone "
+                    f"(interface={info.get('interface_number')}): neither usage "
+                    f"page 0x{CONTROL_USAGE_PAGE:04x} nor interface "
+                    f"{CONTROL_INTERFACE_NUMBER} was found"
+                )
                 return info
         return None
 
@@ -574,7 +590,8 @@ class SoundBlasterG8Driver:
             device = self._device
             if device is None:
                 return False
-            _log(f"-> {buf.hex()} ({len(buf)} bytes)")
+            if self._debug:
+                _log(f"-> {buf.hex()} ({len(buf)} bytes)")
             try:
                 written = device.write(buf)
             except OSError as exc:

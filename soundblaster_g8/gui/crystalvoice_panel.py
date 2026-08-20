@@ -322,8 +322,9 @@ class CrystalVoicePanel(tk.Frame):
                 ok = bool(setter(requested))
             except Exception as exc:  # pragma: no cover - depends on hardware
                 error = exc
-            self.after(
-                0, lambda: self._finish_toggle(label, switch, var, requested, ok, error, select)
+            widgets.post_to_ui(
+                self,
+                lambda: self._finish_toggle(label, switch, var, requested, ok, error, select),
             )
 
         self.controller.submit(worker)
@@ -430,8 +431,11 @@ class CrystalVoicePanel(tk.Frame):
                 ok = bool(setter(slug))
             except Exception as exc:  # pragma: no cover - depends on hardware
                 error = exc
-            self.after(
-                0, lambda: self._finish_preset_change(label, preset, select, slugs, getter, ok, error)
+            widgets.post_to_ui(
+                self,
+                lambda: self._finish_preset_change(
+                    label, preset, select, slugs, getter, ok, error
+                ),
             )
 
         self.controller.submit(worker)
@@ -479,7 +483,7 @@ class CrystalVoicePanel(tk.Frame):
                 ok = bool(self.controller.set_crystalvoice_noise_reduction_level(value / 100.0))
             except Exception as exc:  # pragma: no cover - depends on hardware
                 error = exc
-            self.after(0, lambda: self._finish_level_commit(label, value, ok, error))
+            widgets.post_to_ui(self, lambda: self._finish_level_commit(label, value, ok, error))
 
         self.controller.submit(worker)
 

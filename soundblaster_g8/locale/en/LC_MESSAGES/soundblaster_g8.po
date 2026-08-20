@@ -184,6 +184,15 @@ msgstr "{label}: sending {value:+.1f} dB (approximate)…"
 msgid "{label}: {value:+.1f} dB applied (approximate)"
 msgstr "{label}: {value:+.1f} dB applied (approximate)"
 
+msgid "Preset \"{label}\": sending command…"
+msgstr "Preset \"{label}\": sending command…"
+
+msgid "Preset \"{label}\": command failed (see console)"
+msgstr "Preset \"{label}\": command failed (see console)"
+
+msgid "Preset \"{label}\": error ({error})"
+msgstr "Preset \"{label}\": error ({error})"
+
 msgid "Preset \"{label}\" applied"
 msgstr "Preset \"{label}\" applied"
 

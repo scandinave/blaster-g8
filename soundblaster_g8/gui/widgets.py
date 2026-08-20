@@ -22,6 +22,22 @@ ICON_COLOR = "#cfcfd2"
 BADGE_BG = "#3d3d43"
 
 
+def post_to_ui(widget: tk.Misc, callback: Callable[[], None], delay_ms: int = 0) -> bool:
+    """Schedules ``callback`` on the Tk thread from a worker thread.
+
+    Hardware jobs outlive the window on shutdown: they finish, then hand their
+    result back with ``after()``. Whether that raises on an already-destroyed
+    widget depends on how far Tk has torn itself down - when it does, it raises
+    on the worker thread, where the only thing left to do with it is print it.
+    Returns ``False`` when the result had nowhere to go.
+    """
+    try:
+        widget.after(delay_ms, callback)
+    except (tk.TclError, RuntimeError):
+        return False
+    return True
+
+
 def _rounded_rect_points(x1: float, y1: float, x2: float, y2: float, radius: float) -> list[float]:
     radius = max(0.0, min(radius, (x2 - x1) / 2, (y2 - y1) / 2))
     return [
@@ -836,6 +852,13 @@ class VolumeSlider(tk.Frame):
 
     def set_enabled(self, enabled: bool) -> None:
         self._enabled = enabled
+        if not enabled:
+            # A disabled Slider swallows its own ButtonRelease, so a drag in
+            # progress would never reach _on_drag_release and _dragging would
+            # latch True for good - silencing every later external update (see
+            # Sidebar.set_output_volume). The drag is lost either way; what
+            # matters is that is_dragging() stops lying.
+            self._dragging = False
         self._slider.set_enabled(enabled)
         self._percent_label.config(fg=theme.FG_LABEL if enabled else theme.FG_THUMB_DISABLED)
         self._redraw_icon()

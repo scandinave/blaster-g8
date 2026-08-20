@@ -14,7 +14,7 @@
 SUBSYSTEM=="sound", ACTION=="add", DEVPATH=="*/controlC*", \
   ATTRS{idVendor}=="041e", ATTRS{idProduct}=="329b", \
   TEST=="/usr/bin/systemd-run", \
-  RUN+="/usr/bin/systemd-run --no-block --collect --description='Sound Blaster G8 ALSA fix' /usr/local/bin/soundblaster-g8-alsa-fix.sh"
+  RUN+="/usr/bin/systemd-run --no-block --collect --description='Sound Blaster G8 ALSA fix' /usr/local/lib/soundblaster-g8/soundblaster-g8-alsa-fix.sh"
 
 # Fallback for systems without systemd-run. Best effort: on systemd the child
 # may be killed before the delay elapses, which is exactly the bug above - but
@@ -23,4 +23,4 @@ SUBSYSTEM=="sound", ACTION=="add", DEVPATH=="*/controlC*", \
 SUBSYSTEM=="sound", ACTION=="add", DEVPATH=="*/controlC*", \
   ATTRS{idVendor}=="041e", ATTRS{idProduct}=="329b", \
   TEST!="/usr/bin/systemd-run", \
-  RUN+="/bin/sh -c '/usr/local/bin/soundblaster-g8-alsa-fix.sh &'"
+  RUN+="/bin/sh -c '/usr/local/lib/soundblaster-g8/soundblaster-g8-alsa-fix.sh &'"

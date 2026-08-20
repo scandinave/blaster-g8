@@ -8,7 +8,8 @@ Hardware commands run off the Tk thread, on the controller's shared worker
 (``controller.submit``): toggling Direct Mode triggers a USB reset on the card
 and takes 2 to 4 seconds, which would freeze the window if done in the Tk
 callback. Commands are executed one at a time, in submission order, and the
-result is brought back to the GUI thread via ``self.after(0, ...)``.
+result is brought back to the GUI thread via ``self._post`` (``self.after``
+plus a guard for the window already being gone - see ``widgets.post_to_ui``).
 
 The window holds five "pages" (main page / Equalizer page / CrystalVoice
 page / Decoder page / Settings page) in the same container, only one packed
@@ -80,8 +81,18 @@ class MainWindow(tk.Tk):
         # server, so the 512x512 version costs 3 MB of RSS against 0.2 MB
         # here - for an icon no window manager displays above 128px. The
         # 512x512 file stays on disk for the hicolor theme (debian/rules).
-        self._app_icon_image = tk.PhotoImage(file=str(ASSETS_DIR / "icon-128.png"))
-        self.iconphoto(True, self._app_icon_image)
+        icon_path = ASSETS_DIR / "icon-128.png"
+        self._app_icon_image = None
+        if icon_path.exists():
+            try:
+                self._app_icon_image = tk.PhotoImage(file=str(icon_path))
+            except tk.TclError as exc:
+                print(f"[MainWindow] unusable window icon {icon_path}: {exc}")
+        if self._app_icon_image is not None:
+            self.iconphoto(True, self._app_icon_image)
+        else:
+            # A broken install shouldn't cost the whole window, only its icon.
+            print(f"[MainWindow] window icon missing ({icon_path}): continuing without")
 
         # Controller singleton
         self._controller: Optional[SoundBlasterController] = None
@@ -122,6 +133,12 @@ class MainWindow(tk.Tk):
         self._volume_watcher = None
         self._volume_reenable_job: Optional[str] = None
         self._volume_readable = {system_volume.OUTPUT: False, system_volume.INPUT: False}
+
+        # Set by _on_destroy: a worker job finishing after the window is gone
+        # has nowhere to deliver its result, and depending on how far Tk has
+        # torn itself down, self.after() either silently schedules a callback
+        # no mainloop will ever run or raises TclError on the worker thread.
+        self._closing = False
 
         # Window setup
         self._setup_ui()
@@ -491,7 +508,7 @@ class MainWindow(tk.Tk):
         self._refresh_volumes()
         # The callback fires on the watcher's thread: hop back to Tk's.
         self._volume_watcher = system_volume.start_watch(
-            lambda: self.after(0, self._refresh_volumes)
+            lambda: self._post(self._refresh_volumes)
         )
         self.bind("<Destroy>", self._on_destroy, add="+")
 
@@ -503,8 +520,22 @@ class MainWindow(tk.Tk):
         """
         if event is not None and event.widget is not self:
             return
+        self._closing = True
         system_volume.stop_watch(self._volume_watcher)
         self._volume_watcher = None
+        if self._controller is not None:
+            self._controller.disconnect()
+
+    def _post(self, callback: Callable[[], None], delay_ms: int = 0) -> None:
+        """Schedules ``callback`` on the Tk thread, unless the window is going away.
+
+        Every worker job comes back through here, so shutdown has one place to
+        cut them off rather than one per call site.
+        """
+        if self._closing:
+            return
+        if not widgets.post_to_ui(self, callback, delay_ms):
+            self._closing = True
 
     def _refresh_volumes(self) -> None:
         """Re-reads both system volumes and pushes them to the sidebar.
@@ -520,7 +551,7 @@ class MainWindow(tk.Tk):
                 kind: system_volume.get_volume(kind)
                 for kind in (system_volume.OUTPUT, system_volume.INPUT)
             }
-            self.after(0, lambda: self._show_volumes(readings))
+            self._post(lambda: self._show_volumes(readings))
 
         if self._controller is None:
             self._show_volumes({
@@ -576,10 +607,10 @@ class MainWindow(tk.Tk):
         def worker():
             wait = self._settle_delay_before_write(kind)
             if wait > 0:
-                self.after(int(wait * 1000), lambda: self._apply_volume(kind, percent, label))
+                self._post(lambda: self._apply_volume(kind, percent, label), int(wait * 1000))
                 return
             ok = system_volume.set_volume(kind, percent)
-            self.after(0, lambda: self._finish_volume_change(label, percent, ok))
+            self._post(lambda: self._finish_volume_change(label, percent, ok))
 
         self._controller.submit(worker)
 
@@ -907,14 +938,14 @@ class MainWindow(tk.Tk):
             try:
                 ok = bool(self._controller.prepare_eq_page())
             except Exception as exc:  # pragma: no cover - depends on hardware
-                self.after(0, lambda: self._set_status("Enabling equalizer: error ({error})", error=exc))
+                self._post(lambda: self._set_status("Enabling equalizer: error ({error})", error=exc))
                 return
             if ok:
                 def on_success():
                     self._set_status("Equalizer enabled")
                     if self._eq_panel is not None:
                         self._eq_panel.refresh()
-                self.after(0, on_success)
+                self._post(on_success)
 
         self._controller.submit(worker)
 
@@ -950,7 +981,17 @@ class MainWindow(tk.Tk):
 
     def _render_status(self) -> None:
         template, kwargs = self._last_status
-        text = i18n._(template).format(**kwargs) if kwargs else i18n._(template)
+        translated = i18n._(template)
+        text = translated
+        if kwargs:
+            try:
+                text = translated.format(**kwargs)
+            except (KeyError, IndexError, AttributeError, ValueError) as exc:
+                # The template is ours, but its *translation* is data: a
+                # catalog whose placeholders don't match must not take the
+                # status bar down with it.
+                print(f"[MainWindow] unusable translation for {template!r}: {exc}")
+                text = translated
         self._status_label.config(text=text)
 
     # ------------------------------------------------------------------
@@ -965,11 +1006,11 @@ class MainWindow(tk.Tk):
         write would drop it out of Direct Mode.
         """
         if active:
-            self.after(0, lambda: self._set_status("Direct Mode: reconnecting the device…"))
-            self.after(0, self._lock_volume_sliders)
+            self._post(lambda: self._set_status("Direct Mode: reconnecting the device…"))
+            self._post(self._lock_volume_sliders)
         else:
-            self.after(0, lambda: self._set_status("Device reconnected"))
-            self.after(0, self._unlock_volume_sliders_after_settle)
+            self._post(lambda: self._set_status("Device reconnected"))
+            self._post(self._unlock_volume_sliders_after_settle)
 
     def _lock_volume_sliders(self) -> None:
         if self._volume_reenable_job is not None:
@@ -1022,7 +1063,7 @@ class MainWindow(tk.Tk):
                     state = getter()
             except Exception as exc:  # pragma: no cover - depends on hardware
                 error = exc
-            self.after(0, lambda: self._finish_toggle(
+            self._post(lambda: self._finish_toggle(
                 name, label, var, requested, ok, state, error
             ))
 
@@ -1107,7 +1148,7 @@ class MainWindow(tk.Tk):
                 ok = bool(self._controller.set_sound_mode(slug))
             except Exception as exc:  # pragma: no cover - depends on hardware
                 error = exc
-            self.after(0, lambda: self._finish_sound_mode_change(slug, label, ok, error))
+            self._post(lambda: self._finish_sound_mode_change(slug, label, ok, error))
 
         self._controller.submit(worker)
 

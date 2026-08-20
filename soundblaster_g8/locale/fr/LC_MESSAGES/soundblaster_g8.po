@@ -184,6 +184,15 @@ msgstr "{label} : envoi de {value:+.1f} dB (approximatif)…"
 msgid "{label}: {value:+.1f} dB applied (approximate)"
 msgstr "{label} : {value:+.1f} dB appliqué (approximatif)"
 
+msgid "Preset \"{label}\": sending command…"
+msgstr "Preset « {label} » : envoi de la commande…"
+
+msgid "Preset \"{label}\": command failed (see console)"
+msgstr "Preset « {label} » : échec de la commande (voir la console)"
+
+msgid "Preset \"{label}\": error ({error})"
+msgstr "Preset « {label} » : erreur ({error})"
+
 msgid "Preset \"{label}\" applied"
 msgstr "Preset « {label} » appliqué"
 

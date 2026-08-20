@@ -329,7 +329,7 @@ class EQPanel(tk.Frame):
                 ok = bool(setter(value))
             except Exception as exc:  # pragma: no cover - depends on hardware
                 error = exc
-            self.after(0, lambda: self._finish_tilt(label, value, ok, error))
+            widgets.post_to_ui(self, lambda: self._finish_tilt(label, value, ok, error))
 
         self.controller.submit(worker)
 
@@ -353,7 +353,7 @@ class EQPanel(tk.Frame):
                 ok = bool(action())
             except Exception as exc:  # pragma: no cover - depends on hardware
                 error = exc
-            self.after(0, lambda: self._finish_commit(label, value, ok, error))
+            widgets.post_to_ui(self, lambda: self._finish_commit(label, value, ok, error))
 
         self.controller.submit(worker)
 
@@ -369,12 +369,46 @@ class EQPanel(tk.Frame):
         if self._status_callback is not None:
             self._status_callback(template, **kwargs)
 
+    def _set_preset_buttons_enabled(self, enabled: bool) -> None:
+        """Enables/disables the preset row and Reset All together."""
+        for button in self._preset_buttons.values():
+            button.set_enabled(enabled)
+        self._reset_button.set_enabled(enabled)
+
     def _apply_preset(self, preset_name: str):
-        """Applies a preset to all bands."""
-        self.controller.load_preset(preset_name)
-        self.refresh()
+        """Applies a preset to all bands, in a worker thread.
+
+        A preset is ten hardware writes: run on the Tk thread it would freeze
+        the window, and - since the driver serializes all I/O behind one lock -
+        block for the whole of a Direct Mode reconnection if one is in flight.
+        Same worker pattern as every other write on this page.
+        """
         label = i18n._(PRESET_LABELS.get(preset_name, preset_name))
-        self._set_status('Preset "{label}" applied', label=label)
+        self._set_preset_buttons_enabled(False)
+        self._set_status('Preset "{label}": sending command…', label=label)
+
+        def worker():
+            error: Optional[Exception] = None
+            ok = False
+            try:
+                ok = bool(self.controller.load_preset(preset_name))
+            except Exception as exc:  # pragma: no cover - depends on hardware
+                error = exc
+            widgets.post_to_ui(self, lambda: self._finish_preset(label, ok, error))
+
+        self.controller.submit(worker)
+
+    def _finish_preset(self, label: str, ok: bool, error: Optional[Exception]):
+        """End of a preset: re-enables the buttons and resynchronizes the sliders."""
+        self._set_preset_buttons_enabled(True)
+        self.refresh()
+
+        if error is not None:
+            self._set_status('Preset "{label}": error ({error})', label=label, error=error)
+        elif ok:
+            self._set_status('Preset "{label}" applied', label=label)
+        else:
+            self._set_status('Preset "{label}": command failed (see console)', label=label)
 
     def _reset_all(self):
         """Resets all bands to 0 dB."""
