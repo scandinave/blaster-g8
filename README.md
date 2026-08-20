@@ -1,13 +1,17 @@
 # Sound Blaster G8 Control
 
 Open-source control application for the **Creative Sound Blaster G8** sound
-card, on **macOS** and **Linux** (Windows possible via hidapi, untested).
+card, on **macOS** and **Linux**. Creative does not provide native Linux App and provide outdated one for MacOS.
 Reverse-engineered from the official Creative application: Scout Mode,
 Direct Mode, sound mode presets, 10-band equalizer, CrystalVoice
 (Noise Reduction, Voice Morph, Microphone Equalizer) and the Dolby Digital
 decoder.
 
 ![Main interface](docs/images/main-interface.png)
+
+## Disclamer !!!
+
+This application was created entirely by AI. It is provided as-is , WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, WITHOUT EVEN THE IMPLIED WARRANTY . Use it at your own risk. Most of the features from the Windows Creative App have been implemented.
 
 ## Installation
 
