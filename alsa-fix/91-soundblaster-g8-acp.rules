@@ -1,0 +1,15 @@
+# Sound Blaster G8 - hand the card to our own ALSA card profile set, so that
+# PipeWire/PulseAudio builds a microphone port for its "External Mic" capture
+# source instead of routing the input to Line In and rewriting the mixer
+# behind the fix script's back. See acp/analog-input-external-mic.conf.
+#
+# ACP_PROFILE_SET is the mechanism documented in the header of
+# /usr/share/alsa-card-profile/mixer/profile-sets/default.conf and used by
+# /usr/lib/udev/rules.d/90-pipewire-alsa.rules for its own quirks. Numbered 91
+# to sit after that file.
+#
+# No ACTION filter: PipeWire reads the property from the udev database on the
+# "change" event 78-sound-card.rules emits once the card is fully registered,
+# and setting it on "add" too removes any question of ordering.
+SUBSYSTEM=="sound", KERNEL=="card*", ATTRS{idVendor}=="041e", ATTRS{idProduct}=="329b", \
+  ENV{ACP_PROFILE_SET}="soundblaster-g8.conf"

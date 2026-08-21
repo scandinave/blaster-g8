@@ -4,9 +4,11 @@
 # Uninstall with: sudo ./install.sh --uninstall
 #
 # What this does:
-#   1. Installs a small script that fixes ALSA mixer defaults for the G8
-#   2. Installs a udev rule that runs the script automatically when the G8 is detected
-#   3. Optionally excludes the G8 from `alsactl restore` (needed for Direct Mode)
+#   1. Installs an ALSA card profile that gives the G8 a microphone port, so
+#      PipeWire/PulseAudio selects "External Mic" itself instead of Line In
+#   2. Installs a small script that fixes ALSA mixer defaults for the G8
+#   3. Installs a udev rule that runs the script automatically when the G8 is detected
+#   4. Optionally excludes the G8 from `alsactl restore` (needed for Direct Mode)
 #   That's it. No services, no daemons, no cron jobs.
 
 set -e
@@ -21,7 +23,19 @@ SCRIPT_DIR_DEST="/usr/local/lib/soundblaster-g8"
 SCRIPT_DEST="$SCRIPT_DIR_DEST/soundblaster-g8-alsa-fix.sh"
 RULES_DEST="/etc/udev/rules.d/95-soundblaster-g8-alsa.rules"
 
-# Step 3 is opt-in because it shadows a file owned by alsa-utils. Marker line
+# ALSA card profile (ACP). PipeWire and PulseAudio read profile sets and mixer
+# paths from fixed directories under /usr/share, with no per-user or /etc
+# override, so these two go there. Both file names are our own - no package
+# owns them, so a pipewire update neither removes nor overwrites them.
+ACP_DIR="/usr/share/alsa-card-profile/mixer"
+ACP_PATH_SRC="acp/analog-input-external-mic.conf"
+ACP_PATH_DEST="$ACP_DIR/paths/analog-input-external-mic.conf"
+ACP_PROFILE_SRC="acp/soundblaster-g8.conf"
+ACP_PROFILE_DEST="$ACP_DIR/profile-sets/soundblaster-g8.conf"
+ACP_RULES_SRC="91-soundblaster-g8-acp.rules"
+ACP_RULES_DEST="/etc/udev/rules.d/91-soundblaster-g8-acp.rules"
+
+# Step 4 is opt-in because it shadows a file owned by alsa-utils. Marker line
 # used to make sure --uninstall only ever removes a copy we installed.
 RESTORE_SRC="90-alsa-restore.rules"
 RESTORE_DEST="/etc/udev/rules.d/90-alsa-restore.rules"
@@ -74,11 +88,17 @@ do_install() {
     install -m 644 "$SCRIPT_DIR/$RULES_SRC" "$RULES_DEST"
     echo "  ✓ Installed $RULES_DEST"
 
+    install_card_profile "$SCRIPT_DIR"
+
     install_restore_override "$SCRIPT_DIR"
 
     # Reload udev rules
     udevadm control --reload-rules
     echo "  ✓ Reloaded udev rules"
+    # Re-run the rules against the card that is already there, so
+    # ACP_PROFILE_SET lands in its udev database without a replug. Harmless
+    # when no G8 is connected.
+    udevadm trigger --subsystem-match=sound --action=change 2>/dev/null || true
 
     echo ""
     echo "Done! The fix will apply automatically whenever the G8 is plugged in."
@@ -90,9 +110,53 @@ do_install() {
         echo "G8 detected — applying fix now..."
         "$SCRIPT_DEST" --now
         echo "  ✓ Fix applied to current session"
+        if [ -f "$ACP_PROFILE_DEST" ]; then
+            echo ""
+            echo "  The sound server only rebuilds the card on startup. To pick up"
+            echo "  the new microphone port without replugging the G8, run as your"
+            echo "  own user (not root):"
+            echo ""
+            echo "      systemctl --user restart wireplumber"
+            echo ""
+            echo "  then select 'Microphone' as the G8's input in your sound"
+            echo "  settings if it isn't already."
+        fi
     else
         echo "Plug in your G8 and it'll be configured automatically."
     fi
+}
+
+# --- The microphone port: teaching the sound server about "External Mic" ---
+
+# The stock ALSA card profile has no port for the G8's microphone: its
+# paths/analog-input-mic.conf only maps the "Mic" and "Mic-In/Mic Array" items
+# of the "PCM Capture Source" enumeration, and the G8's item is named
+# "External Mic". Line In *is* mapped, so it becomes the card's only analog
+# input port, and the sound server writes "PCM Capture Source" back to
+# "Line In" every time it applies that route - undoing the fix script.
+#
+# These two files add the missing port. They are only useful to a sound server
+# that reads ACP configuration (PipeWire, PulseAudio); on a system without
+# one, $ACP_DIR does not exist and the fix script alone does the job.
+install_card_profile() {
+    src_dir="$1"
+
+    if [ ! -d "$ACP_DIR/paths" ] || [ ! -d "$ACP_DIR/profile-sets" ]; then
+        echo "  · No ALSA card profile directory ($ACP_DIR) — microphone port skipped"
+        echo "    (PipeWire/PulseAudio not installed; the fix script still applies)"
+        return 0
+    fi
+
+    [ -f "$src_dir/$ACP_PATH_SRC" ] || die "Cannot find $ACP_PATH_SRC in $src_dir"
+    [ -f "$src_dir/$ACP_PROFILE_SRC" ] || die "Cannot find $ACP_PROFILE_SRC in $src_dir"
+    [ -f "$src_dir/$ACP_RULES_SRC" ] || die "Cannot find $ACP_RULES_SRC in $src_dir"
+
+    install -m 644 "$src_dir/$ACP_PATH_SRC" "$ACP_PATH_DEST"
+    echo "  ✓ Installed $ACP_PATH_DEST"
+    install -m 644 "$src_dir/$ACP_PROFILE_SRC" "$ACP_PROFILE_DEST"
+    echo "  ✓ Installed $ACP_PROFILE_DEST"
+    install -m 644 "$src_dir/$ACP_RULES_SRC" "$ACP_RULES_DEST"
+    echo "  ✓ Installed $ACP_RULES_DEST"
 }
 
 # --- Direct Mode: excluding the G8 from alsactl restore ---
@@ -164,6 +228,12 @@ uninstall() {
         && echo "  ✓ Removed $SCRIPT_DIR_DEST"
     [ -f "$RULES_DEST" ] && rm -f "$RULES_DEST" && echo "  ✓ Removed $RULES_DEST"
 
+    # ALSA card profile. Removing the udev rule alone would be enough to stop
+    # using it, but leaving orphan files in /usr/share is not our style.
+    for acp_file in "$ACP_RULES_DEST" "$ACP_PROFILE_DEST" "$ACP_PATH_DEST"; do
+        [ -f "$acp_file" ] && rm -f "$acp_file" && echo "  ✓ Removed $acp_file"
+    done
+
     # Only remove the alsa-restore override if it is the one we installed:
     # anything else at that path is the user's own and none of our business.
     if [ -f "$RESTORE_DEST" ]; then
@@ -192,8 +262,9 @@ case "${1:-}" in
     --help|-h)
         echo "Usage: sudo ./install.sh [--uninstall]"
         echo ""
-        echo "Installs a udev rule + script that automatically fixes ALSA"
-        echo "mixer defaults for the Sound Blaster G8 whenever it's plugged in."
+        echo "Installs an ALSA card profile that gives the Sound Blaster G8 a"
+        echo "microphone port, plus a udev rule + script that fix its ALSA mixer"
+        echo "defaults whenever it's plugged in."
         ;;
     *)
         do_install

@@ -73,13 +73,17 @@ therefore picks up nothing until the source is changed manually, on every
 restart of the card.
 
 The application re-applies this fix on every startup
-(`soundblaster_g8/alsa_fix.py`). For the microphone to work even without
-launching the app (e.g. right after plugging in the card), also install the
-system-level fix:
+(`soundblaster_g8/alsa_fix.py`), but that only holds until PipeWire (or
+PulseAudio) applies its own routing: the card exposes no microphone port to
+the sound server, which therefore routes the input to `Line In` and rewrites
+the control. Installing the system-level fix is what makes the setting stick,
+and it works without ever launching the app:
 
 ```bash
 sudo alsa-fix/install.sh
+systemctl --user restart wireplumber   # or replug the card
 ```
 
-See [`alsa-fix/README.md`](../alsa-fix/README.md) for details (udev rule +
-script, uninstallation).
+That installs an ALSA card profile giving the G8 a real *Microphone* input in
+the desktop's sound settings, plus the udev rule and script. See
+[`alsa-fix/README.md`](../alsa-fix/README.md) for details and uninstallation.

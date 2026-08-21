@@ -11,10 +11,10 @@ sudo apt install debhelper dh-python pybuild-plugin-pyproject \
 dpkg-buildpackage -us -uc -b
 ```
 
-This produces `../soundblaster-g8_0.1.0-1_all.deb`. Install it with:
+This produces `../soundblaster-g8_0.1.1-1_all.deb`. Install it with:
 
 ```bash
-sudo apt install ../soundblaster-g8_0.1.0-1_all.deb
+sudo apt install ../soundblaster-g8_0.1.1-1_all.deb
 ```
 
 The package installs the application (`soundblaster-g8` on `$PATH`), a
@@ -23,7 +23,7 @@ menu entry with icon, and the HID udev rule
 [linux-setup.md](linux-setup.md#access-rights-udev)) - so, unlike the
 manual install, no `sudo cp` / `udevadm trigger` step is needed for the
 card to be accessible without root. The optional ALSA fix
-(`alsa-fix/install.sh`) is not part of the package and still needs to be
-installed separately if desired (the app re-applies the same fix at every
-startup regardless, see
+(`alsa-fix/install.sh`: microphone card profile, udev rule and script) is not
+part of the package and still needs to be installed separately if desired (the
+app re-applies the mixer part of it at every startup regardless, see
 [linux-setup.md](linux-setup.md#microphone-disabled-at-startup-alsa-capture-source)).
