@@ -16,6 +16,12 @@ never localized) rather than by parsing ``aplay -l``'s output, which is
 localized (e.g. ``carte 1 : ...`` in French instead of ``card 1: ...``) and
 makes matching by card name unreliable.
 
+On a PipeWire/PulseAudio desktop, :func:`ensure_microphone_port` also moves
+the G8's source onto the microphone port that ``alsa-fix/acp/`` adds: a
+``Line In`` route remembered by WirePlumber from before that profile was
+installed wins over the new port's priority, and the sound server then writes
+``Line In`` back on every resume.
+
 Control targeting by name (``amixer sset 'PCM Capture Source' ...``) rather
 than by ``numid``, which can be renumbered between driver/kernel versions.
 """
@@ -23,6 +29,7 @@ than by ``numid``, which can be renumbered between driver/kernel versions.
 from __future__ import annotations
 
 import glob
+import json
 import os
 import platform
 import subprocess
@@ -33,6 +40,11 @@ CAPTURE_SOURCE_CONTROL = "PCM Capture Source"
 CAPTURE_SOURCE_TARGET = "External Mic"
 
 AMIXER_TIMEOUT_S = 3.0
+
+#: Sound server port names, from ``alsa-fix/acp/`` and the stock
+#: ``paths/analog-input-linein.conf``.
+MIC_PORT = "analog-input-external-mic"
+LINE_IN_PORT = "analog-input-linein"
 
 #: How long the card must have been enumerated before its mixer may be
 #: written to. Writing sooner knocks it out of Direct Mode: measured on
@@ -162,3 +174,77 @@ def ensure_microphone_source(
 
     _log(f"capture source set to '{CAPTURE_SOURCE_TARGET}' (card {card_index})")
     return True
+
+
+def _pactl(args: list[str]) -> Optional[str]:
+    """Runs ``pactl``, returning its stdout or ``None`` on any failure."""
+    try:
+        result = subprocess.run(
+            ["pactl", *args],
+            capture_output=True,
+            text=True,
+            timeout=AMIXER_TIMEOUT_S,
+        )
+    except FileNotFoundError:
+        return None  # no PulseAudio/PipeWire: amixer alone is the fix
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        _log(f"'pactl {' '.join(args)}' failed: {exc}")
+        return None
+    if result.returncode != 0:
+        _log(f"'pactl {' '.join(args)}' failed: {result.stderr.strip() or result.returncode}")
+        return None
+    return result.stdout
+
+
+def ensure_microphone_port(
+    vendor_id: int,
+    product_id: int,
+    settle_delay: float = SETTLE_DELAY_S,
+) -> bool:
+    """Moves the G8's sound server source from Line In to the microphone port.
+
+    Only acts when the source sits on ``Line In`` *and* offers the
+    microphone port (i.e. the ``alsa-fix/`` card profile is installed): any
+    other port is a choice the user made, and is left alone. Once switched,
+    WirePlumber remembers the new route, so this normally fires only once.
+
+    Same rules as :func:`ensure_microphone_source`: Linux only, never raises,
+    and skipped while the card is settling - the port switch writes
+    ``PCM Capture Source`` too.
+    """
+    if platform.system() != "Linux":
+        return False
+
+    age = seconds_since_enumeration(vendor_id, product_id)
+    if age is not None and age < settle_delay:
+        return False
+
+    # JSON rather than the human-readable listing, which is localized.
+    output = _pactl(["--format=json", "list", "sources"])
+    if output is None:
+        return False
+    try:
+        sources = json.loads(output)
+    except ValueError as exc:
+        _log(f"unreadable 'pactl list sources' output: {exc}")
+        return False
+
+    vendor = f"0x{vendor_id:04x}"
+    product = f"0x{product_id:04x}"
+    switched = False
+    for source in sources:
+        properties = source.get("properties", {})
+        if (
+            properties.get("device.vendor.id") != vendor
+            or properties.get("device.product.id") != product
+            or source.get("active_port") != LINE_IN_PORT
+        ):
+            continue
+        ports = {port.get("name") for port in source.get("ports", [])}
+        if MIC_PORT not in ports:
+            continue  # card profile not installed: nothing better to offer
+        name = source.get("name", "")
+        if _pactl(["set-source-port", name, MIC_PORT]) is not None:
+            _log(f"source '{name}' moved from Line In to the microphone port")
+            switched = True
+    return switched

@@ -99,7 +99,9 @@ changes.
 
 **If the input stays on "Line In" after installing**: a previous route is
 remembered in `~/.local/state/wireplumber/default-routes`. Pick *Microphone*
-once in the sound settings — that replaces it.
+once in the sound settings — that replaces it. The app does this for you on
+startup (`alsa_fix.ensure_microphone_port`) when it finds the G8's source on
+*Line In* with the microphone port available.
 
 ## Direct Mode, and why this fix has to wait
 

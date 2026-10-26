@@ -196,12 +196,13 @@ class SoundBlasterController:
     def connect(self) -> bool:
         """Establishes the hardware connection then loads the known state.
 
-        Also re-applies the ALSA fix (mic capture source, see
-        :mod:`soundblaster_g8.alsa_fix`): this bug is independent of the
+        Also re-applies the ALSA fix (mic capture source and sound server
+        port, see :mod:`soundblaster_g8.alsa_fix`): this bug is independent of the
         HID control channel, so it's handled even if the HID connection
         fails.
         """
         alsa_fix.ensure_microphone_source(VENDOR_ID, PRODUCT_ID)
+        alsa_fix.ensure_microphone_port(VENDOR_ID, PRODUCT_ID)
         connected = self._driver.connect()
         if connected:
             self._load_current_state()
