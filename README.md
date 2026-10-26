@@ -21,7 +21,7 @@ This application was created entirely by AI. It is provided as-is , WITHOUT WARR
 sudo apt install debhelper dh-python pybuild-plugin-pyproject \
     python3-all python3-setuptools gettext
 dpkg-buildpackage -us -uc -b
-sudo apt install ../soundblaster-g8_0.1.1-1_all.deb
+sudo apt install ../soundblaster-g8_0.1.2-1_all.deb
 ```
 
 Installs the app (`soundblaster-g8` on `$PATH`), a menu entry, and the

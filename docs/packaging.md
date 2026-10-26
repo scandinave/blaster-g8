@@ -11,10 +11,10 @@ sudo apt install debhelper dh-python pybuild-plugin-pyproject \
 dpkg-buildpackage -us -uc -b
 ```
 
-This produces `../soundblaster-g8_0.1.1-1_all.deb`. Install it with:
+This produces `../soundblaster-g8_0.1.2-1_all.deb`. Install it with:
 
 ```bash
-sudo apt install ../soundblaster-g8_0.1.1-1_all.deb
+sudo apt install ../soundblaster-g8_0.1.2-1_all.deb
 ```
 
 The package installs the application (`soundblaster-g8` on `$PATH`), a

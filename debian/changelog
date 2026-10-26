@@ -1,3 +1,9 @@
+soundblaster-g8 (0.1.2-1) unstable; urgency=medium
+
+  * Fix output selection with pipewire that cause the micro to no work.
+
+ -- Romain LE BARO <romain.lebaro@protonmail.com>  Tue, 26 Oct 2026 10:09:00 +0100
+
 soundblaster-g8 (0.1.1-1) unstable; urgency=medium
 
   * Initial release.
